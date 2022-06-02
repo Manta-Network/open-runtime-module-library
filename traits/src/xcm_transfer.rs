@@ -11,6 +11,7 @@ pub trait XcmTransfer<AccountId, Balance, CurrencyId> {
 		amount: Balance,
 		dest: MultiLocation,
 		dest_weight: Weight,
+		call: Option<Vec<u8>>,
 	) -> DispatchResult;
 
 	/// Transfer `MultiAsset`
