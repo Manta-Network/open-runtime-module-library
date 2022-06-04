@@ -605,12 +605,11 @@ pub mod module {
 					&dest,
 					Some(T::SelfLocation::get()),
 					dest_weight,
-					None,
 				)?;
 
 				// Second xcm send to dest chain.
 				Self::execute_and_send_reserve_kind_xcm(
-					origin_location,
+					origin_location.clone(),
 					assets_to_dest,
 					fee_to_dest,
 					non_fee_reserve,
@@ -618,7 +617,6 @@ pub mod module {
 					None,
 					dest_weight,
 					// fee_reserve != non_fee_reserve
-					None,
 				)?;
 			} else {
 				Self::execute_and_send_reserve_kind_xcm(
@@ -629,52 +627,55 @@ pub mod module {
 					&dest,
 					None,
 					dest_weight,
-					transact_fee_assets.clone(),
 				)?;
+			}
 
-				// TODO: can do another execute_and_send_reserve_kind_xcm() for the transact_fee
-				// instead of in the inner functions...
+			if let Some(call) = maybe_call {
+				if let Some(transact_fee_asset) = transact_fee_assets {
+					let mut transact_fee_assets = MultiAssets::new();
+					transact_fee_assets.push(transact_fee_asset.clone());
+					// TODO: do i need this reserve()
+					let transact_fee_reserve = T::ReserveProvider::reserve(&transact_fee_asset);
+					Self::execute_and_send_reserve_kind_xcm(
+						origin_location.clone(),
+						transact_fee_assets.clone(),
+						transact_fee_asset.clone(),
+						transact_fee_reserve.clone(),
+						&dest,
+						// recipient has to be sovereign account of sender chain
+						Some(T::SelfLocation::get()),
+						dest_weight,
+					)?;
 
-				if let Some(non_fee_reserve) = non_fee_reserve {
-					if let Some(call) = maybe_call {
-						if let Some(transact_fee_asset) = transact_fee_assets {
-							let (_, _, reserve, _) = Self::transfer_kind(Some(non_fee_reserve.clone()), &dest)?;
+					// TODO: is this the best way to get dest location
+					let dest_location = dest.chain_part().ok_or(Error::<T>::AssetHasNoReserve)?;
+					let ancestry = T::LocationInverter::ancestry();
+					let transact_fee_asset = transact_fee_asset
+						.clone()
+						.reanchored(&dest_location, &ancestry)
+						.map_err(|_| Error::<T>::CannotReanchor)?;
 
-							//let asset = assets.get(0).ok_or(Error::<T>::AssetIndexNonExistent)?;
-							let ancestry = T::LocationInverter::ancestry();
-							let transact_fee_asset = transact_fee_asset
-								.clone()
-								.reanchored(&reserve, &ancestry)
-								.map_err(|_| Error::<T>::CannotReanchor)?;
-							let mut transact_fee_assets = MultiAssets::new();
-							transact_fee_assets.push(transact_fee_asset.clone());
-							//non_fee_reserve = non_fee_reserve.unwrap();
-							let instructions = Xcm(vec![
-								WithdrawAsset(transact_fee_assets),
-								// TODO: unwrap() !!
-								BuyExecution {
-									fees: transact_fee_asset,
-									weight_limit: WeightLimit::Limited(dest_weight),
-								},
-								//Self::buy_execution(transact_fee_asset, &reserve, dest_weight)?,
-								Transact {
-									origin_type: OriginKind::SovereignAccount,
-									require_weight_at_most: dest_weight,
-									call: call.into(),
-								},
-							]);
+					let mut transact_fee_assets = MultiAssets::new();
+					transact_fee_assets.push(transact_fee_asset.clone());
+					let instructions = Xcm(vec![
+						WithdrawAsset(transact_fee_assets),
+						BuyExecution {
+							fees: transact_fee_asset,
+							weight_limit: WeightLimit::Limited(dest_weight),
+						},
+						Transact {
+							origin_type: OriginKind::SovereignAccount,
+							require_weight_at_most: dest_weight,
+							call: call.into(),
+						},
+						// TODO:
+						// RefundSurplus
+						// DepositAsset(user_account)
+					]);
 
-							let _res = T::XcmSender::send_xcm(non_fee_reserve.clone(), instructions);
-						}
-					}
+					let _res = T::XcmSender::send_xcm(dest_location.clone(), instructions);
 				}
 			}
-			// TODO:
-			// if transact and fee exist
-			// if user has fee exists here
-			// if dest is reserve chain for fee (this does not necessarily have to be the
-			// case, any asset can be withdrawn into holding) withdraw fee (guaranteed to be
-			// ToReserve)
 
 			Self::deposit_event(Event::<T>::TransferredMultiAssets {
 				sender: who,
@@ -696,7 +697,6 @@ pub mod module {
 			dest: &MultiLocation,
 			maybe_recipient_override: Option<MultiLocation>,
 			dest_weight: Weight,
-			transact_fee_assets: Option<MultiAsset>,
 		) -> DispatchResult {
 			let (transfer_kind, dest, reserve, recipient) = Self::transfer_kind(reserve, dest)?;
 			let recipient = match maybe_recipient_override {
@@ -706,7 +706,7 @@ pub mod module {
 
 			let mut msg = match transfer_kind {
 				SelfReserveAsset => Self::transfer_self_reserve_asset(assets, fee, dest, recipient, dest_weight)?,
-				ToReserve => Self::transfer_to_reserve(assets, fee, dest, recipient, dest_weight, transact_fee_assets)?,
+				ToReserve => Self::transfer_to_reserve(assets, fee, dest, recipient, dest_weight)?,
 				ToNonReserve => Self::transfer_to_non_reserve(assets, fee, reserve, dest, recipient, dest_weight)?,
 			};
 
@@ -748,74 +748,18 @@ pub mod module {
 			reserve: MultiLocation,
 			recipient: MultiLocation,
 			dest_weight: Weight,
-			transact_fee_assets: Option<MultiAsset>,
 		) -> Result<Xcm<T::Call>, DispatchError> {
-			// let dest_msg = match call {
-			// 	Some(call) => Xcm(vec![
-			// 		Self::buy_execution(fee, &reserve, dest_weight)?,
-			// 		//ClearOrigin,
-			// 		//DescendOrigin(who),
-			// 		// Transact {
-			// 		// 	origin_type: OriginKind::Native,
-			// 		// 	require_weight_at_most: dest_weight,
-			// 		// 	call: call.into(),
-			// 		// },
-			// 		Self::deposit_asset(recipient, assets.len() as u32),
-			// 	]),
-			// 	None => Xcm(vec![
-			// 		Self::buy_execution(fee, &reserve, dest_weight)?,
-			// 		Self::deposit_asset(recipient, assets.len() as u32),
-			// 	]),
-			// };
-
-			// Ok(Xcm(vec![
-			// 	WithdrawAsset(assets.clone()),
-			// 	InitiateReserveWithdraw {
-			// 		assets: All.into(),
-			// 		reserve: reserve.clone(),
-			// 		xcm: dest_msg,
-			// 	},
-			// ]))
-
-			///////////////////////////////////////////////////////////////////////////////////////
-
-			let dest_msg = Xcm(vec![
-				Self::buy_execution(fee.clone(), &reserve, dest_weight)?,
-				Self::deposit_asset(recipient, assets.len() as u32),
-			]);
-
-			let full_xcm = Xcm(vec![
+			Ok(Xcm(vec![
 				WithdrawAsset(assets.clone()),
 				InitiateReserveWithdraw {
 					assets: All.into(),
 					reserve: reserve.clone(),
-					xcm: dest_msg,
+					xcm: Xcm(vec![
+						Self::buy_execution(fee, &reserve, dest_weight)?,
+						Self::deposit_asset(recipient, assets.len() as u32),
+					]),
 				},
-			]);
-
-			if let Some(transact_fee_asset) = transact_fee_assets {
-				let mut transact_fee_assets = MultiAssets::new();
-				transact_fee_assets.push(transact_fee_asset.clone());
-
-				let self_location = T::SelfLocation::get();
-				let dest_msg_2 = Xcm(vec![
-					Self::buy_execution(transact_fee_asset, &reserve, dest_weight)?,
-					Self::deposit_asset(self_location, assets.len() as u32),
-				]);
-
-				let mut extension = vec![
-					WithdrawAsset(transact_fee_assets.clone()),
-					InitiateReserveWithdraw {
-						assets: All.into(),
-						reserve: reserve.clone(),
-						xcm: dest_msg_2,
-					},
-				];
-				extension.extend(full_xcm.0.into_iter());
-				return Ok(Xcm(extension));
-			}
-
-			Ok(full_xcm)
+			]))
 		}
 
 		fn transfer_to_non_reserve(
