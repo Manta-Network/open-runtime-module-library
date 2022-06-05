@@ -409,26 +409,19 @@ pub mod module {
 			);
 
 			let asset: MultiAsset = (location.clone(), amount.into()).into();
-			if let Some(transact_fee) = maybe_transact_fee {
-				return Self::do_transfer_multiassets(
-					who,
-					vec![asset.clone()].into(),
-					asset,
-					dest,
-					dest_weight,
-					maybe_call,
-					Some((location, transact_fee.into()).into()),
-				);
+			let maybe_transact_fee_asset: Option<MultiAsset> = match maybe_transact_fee {
+				Some(transact_fee) => Some((location, transact_fee.into()).into()),
+				_ => None,
 			};
 
 			Self::do_transfer_multiassets(
-				who,
+				who.clone(),
 				vec![asset.clone()].into(),
 				asset,
-				dest,
+				dest.clone(),
 				dest_weight,
-				maybe_call,
-				None,
+				maybe_call.clone(),
+				maybe_transact_fee_asset,
 			)
 		}
 
@@ -536,7 +529,7 @@ pub mod module {
 			dest: MultiLocation,
 			dest_weight: Weight,
 			maybe_call: Option<Vec<u8>>,
-			transact_fee_assets: Option<MultiAsset>,
+			maybe_transact_fee_assets: Option<MultiAsset>,
 		) -> DispatchResult {
 			ensure!(
 				assets.len() <= T::MaxAssetsForTransfer::get(),
@@ -631,7 +624,7 @@ pub mod module {
 			}
 
 			if let Some(call) = maybe_call {
-				if let Some(transact_fee_asset) = transact_fee_assets {
+				if let Some(transact_fee_asset) = maybe_transact_fee_assets {
 					let mut transact_fee_assets = MultiAssets::new();
 					transact_fee_assets.push(transact_fee_asset.clone());
 					// TODO: do i need this reserve()
@@ -648,11 +641,11 @@ pub mod module {
 					)?;
 
 					// TODO: is this the best way to get dest location
-					let dest_location = dest.chain_part().ok_or(Error::<T>::AssetHasNoReserve)?;
+					let target_location = dest.chain_part().ok_or(Error::<T>::AssetHasNoReserve)?;
 					let ancestry = T::LocationInverter::ancestry();
 					let transact_fee_asset = transact_fee_asset
 						.clone()
-						.reanchored(&dest_location, &ancestry)
+						.reanchored(&target_location, &ancestry)
 						.map_err(|_| Error::<T>::CannotReanchor)?;
 
 					let mut transact_fee_assets = MultiAssets::new();
@@ -661,6 +654,7 @@ pub mod module {
 						WithdrawAsset(transact_fee_assets),
 						BuyExecution {
 							fees: transact_fee_asset,
+							// TODO: pass separate dest_weight for transact_fee_asset
 							weight_limit: WeightLimit::Limited(dest_weight),
 						},
 						Transact {
@@ -670,10 +664,10 @@ pub mod module {
 						},
 						// TODO:
 						// RefundSurplus
-						// DepositAsset(user_account)
+						// DepositAsset(user_account or back to sovereign_account)
 					]);
 
-					let _res = T::XcmSender::send_xcm(dest_location.clone(), instructions);
+					let _res = T::XcmSender::send_xcm(target_location.clone(), instructions);
 				}
 			}
 
