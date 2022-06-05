@@ -197,7 +197,7 @@ pub mod module {
 		/// received. Receiving depends on if the XCM message could be delivered
 		/// by the network, and if the receiving chain would handle
 		/// messages correctly.
-		//#[pallet::weight(Pallet::<T>::weight_of_transfer(currency_id.clone(), *amount, dest, maybe_call,
+		//#[pallet::weight(Pallet::<T>::weight_of_transfer(currency_id.clone(), *amount, dest, maybe_transact_call,
 		//#[pallet::weight(Pallet::<T>::weight_of_transfer(currency_id.clone(), dest_weight))]
 		#[pallet::weight(Pallet::<T>::weight_of_transfer(currency_id.clone(), *amount, dest))]
 		#[transactional]
@@ -207,7 +207,7 @@ pub mod module {
 			amount: T::Balance,
 			dest: Box<VersionedMultiLocation>,
 			dest_weight: Weight,
-			maybe_call: Option<Vec<u8>>,
+			maybe_transact_call: Option<Vec<u8>>,
 			maybe_transact_fee: Option<T::Balance>,
 		) -> DispatchResult {
 			let who = ensure_signed(origin)?;
@@ -218,7 +218,7 @@ pub mod module {
 				amount,
 				dest,
 				dest_weight,
-				maybe_call,
+				maybe_transact_call,
 				maybe_transact_fee,
 			)
 		}
@@ -242,6 +242,9 @@ pub mod module {
 			asset: Box<VersionedMultiAsset>,
 			dest: Box<VersionedMultiLocation>,
 			dest_weight: Weight,
+			// TODO:
+			// maybe_transact_call: Option<Vec<u8>>,
+			// maybe_transact_fee_asset: Option<Box<VersionedMultiAsset>,
 		) -> DispatchResult {
 			let who = ensure_signed(origin)?;
 			let asset: MultiAsset = (*asset).try_into().map_err(|()| Error::<T>::BadVersion)?;
@@ -279,6 +282,9 @@ pub mod module {
 			fee: T::Balance,
 			dest: Box<VersionedMultiLocation>,
 			dest_weight: Weight,
+			// TODO:
+			// maybe_transact_call: Option<Vec<u8>>,
+			// maybe_transact_fee: Option<T::Balance>,
 		) -> DispatchResult {
 			let who = ensure_signed(origin)?;
 			let dest: MultiLocation = (*dest).try_into().map_err(|()| Error::<T>::BadVersion)?;
@@ -315,6 +321,9 @@ pub mod module {
 			fee: Box<VersionedMultiAsset>,
 			dest: Box<VersionedMultiLocation>,
 			dest_weight: Weight,
+			// TODO:
+			// maybe_transact_call: Option<Vec<u8>>,
+			// maybe_transact_fee_asset: Option<Box<VersionedMultiAsset>,
 		) -> DispatchResult {
 			let who = ensure_signed(origin)?;
 			let asset: MultiAsset = (*asset).try_into().map_err(|()| Error::<T>::BadVersion)?;
@@ -347,6 +356,9 @@ pub mod module {
 			fee_item: u32,
 			dest: Box<VersionedMultiLocation>,
 			dest_weight: Weight,
+			// TODO:
+			// maybe_transact_call: Option<Vec<u8>>,
+			// maybe_transact_fee_asset: Option<Box<VersionedMultiAsset>,
 		) -> DispatchResult {
 			let who = ensure_signed(origin)?;
 			let dest: MultiLocation = (*dest).try_into().map_err(|()| Error::<T>::BadVersion)?;
@@ -377,6 +389,9 @@ pub mod module {
 			fee_item: u32,
 			dest: Box<VersionedMultiLocation>,
 			dest_weight: Weight,
+			// TODO:
+			// maybe_transact_call: Option<Vec<u8>>,
+			// maybe_transact_fee_asset: Option<Box<VersionedMultiAsset>,
 		) -> DispatchResult {
 			let who = ensure_signed(origin)?;
 			let assets: MultiAssets = (*assets).try_into().map_err(|()| Error::<T>::BadVersion)?;
@@ -396,7 +411,7 @@ pub mod module {
 			amount: T::Balance,
 			dest: MultiLocation,
 			dest_weight: Weight,
-			maybe_call: Option<Vec<u8>>,
+			maybe_transact_call: Option<Vec<u8>>,
 			maybe_transact_fee: Option<T::Balance>,
 		) -> DispatchResult {
 			let location: MultiLocation =
@@ -420,7 +435,7 @@ pub mod module {
 				asset,
 				dest.clone(),
 				dest_weight,
-				maybe_call.clone(),
+				maybe_transact_call.clone(),
 				maybe_transact_fee_asset,
 			)
 		}
@@ -432,6 +447,9 @@ pub mod module {
 			fee: T::Balance,
 			dest: MultiLocation,
 			dest_weight: Weight,
+			// TODO:
+			// maybe_transact_call: Option<Vec<u8>>,
+			// maybe_transact_fee: Option<T::Balance>,
 		) -> DispatchResult {
 			let location: MultiLocation =
 				T::CurrencyIdConvert::convert(currency_id).ok_or(Error::<T>::NotCrossChainTransferableCurrency)?;
@@ -528,8 +546,8 @@ pub mod module {
 			fee: MultiAsset,
 			dest: MultiLocation,
 			dest_weight: Weight,
-			maybe_call: Option<Vec<u8>>,
-			maybe_transact_fee_assets: Option<MultiAsset>,
+			maybe_transact_call: Option<Vec<u8>>,
+			maybe_transact_fee_asset: Option<MultiAsset>,
 		) -> DispatchResult {
 			ensure!(
 				assets.len() <= T::MaxAssetsForTransfer::get(),
@@ -623,8 +641,8 @@ pub mod module {
 				)?;
 			}
 
-			if let Some(call) = maybe_call {
-				if let Some(transact_fee_asset) = maybe_transact_fee_assets {
+			if let Some(call) = maybe_transact_call {
+				if let Some(transact_fee_asset) = maybe_transact_fee_asset {
 					let mut transact_fee_assets = MultiAssets::new();
 					transact_fee_assets.push(transact_fee_asset.clone());
 					// TODO: do i need this reserve()
@@ -865,7 +883,8 @@ pub mod module {
 			let asset: Result<MultiAsset, _> = asset.clone().try_into();
 			let dest = dest.clone().try_into();
 			// TODO:
-			// if maybe_call, include Transact instruction with required_weight_at_most
+			// if maybe_transact_call, include Transact instruction with
+			// required_weight_at_most
 			if let (Ok(asset), Ok(dest)) = (asset, dest) {
 				if let Ok((transfer_kind, dest, _, reserve)) =
 					Self::transfer_kind(T::ReserveProvider::reserve(&asset), &dest)
@@ -902,7 +921,7 @@ pub mod module {
 			currency_id: T::CurrencyId,
 			amount: T::Balance,
 			dest: &VersionedMultiLocation,
-			// maybe_call: Option<Vec<u8>>,
+			// maybe_transact_call: Option<Vec<u8>>,
 			// dest_weight: Weight,
 		) -> Weight {
 			if let Some(location) = T::CurrencyIdConvert::convert(currency_id) {
@@ -996,7 +1015,7 @@ pub mod module {
 			amount: T::Balance,
 			dest: MultiLocation,
 			dest_weight: Weight,
-			maybe_call: Option<Vec<u8>>,
+			maybe_transact_call: Option<Vec<u8>>,
 			maybe_transact_fee: T::Balance,
 		) -> DispatchResult {
 			Self::do_transfer(
@@ -1005,7 +1024,7 @@ pub mod module {
 				amount,
 				dest,
 				dest_weight,
-				maybe_call,
+				maybe_transact_call,
 				Some(maybe_transact_fee),
 			)
 		}
