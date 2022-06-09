@@ -12,9 +12,9 @@ pub trait XcmTransfer<AccountId, Balance, CurrencyId> {
 		amount: Balance,
 		dest: MultiLocation,
 		dest_weight: Weight,
-		maybe_call: Option<Vec<u8>>,
+		//maybe_call: Option<Vec<u8>>,
 		//maybe_transact_call: Option<DoubleEncoded<Call>>,
-		maybe_transact_fee: Balance,
+		//maybe_transact_fee: Balance,
 	) -> DispatchResult;
 
 	/// Transfer `MultiAsset`
