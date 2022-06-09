@@ -208,6 +208,7 @@ pub mod module {
 			dest: Box<VersionedMultiLocation>,
 			dest_weight: Weight,
 			maybe_transact_call: Option<Vec<u8>>,
+			//maybe_transact_call: Option<DoubleEncoded<T::Call>>,
 			maybe_transact_fee: Option<T::Balance>,
 		) -> DispatchResult {
 			let who = ensure_signed(origin)?;
@@ -220,6 +221,42 @@ pub mod module {
 				dest_weight,
 				maybe_transact_call,
 				maybe_transact_fee,
+				None,
+			)
+		}
+
+		#[pallet::weight(0)]
+		#[transactional]
+		pub fn transfer_with_transact(
+			origin: OriginFor<T>,
+			currency_id: T::CurrencyId,
+			amount: T::Balance,
+			dest_id: u32,
+			dest_weight: Weight,
+			maybe_transact_call: Option<Vec<u8>>,
+			//maybe_transact_call: Option<DoubleEncoded<T::Call>>,
+			maybe_transact_fee: Option<T::Balance>,
+		) -> DispatchResult {
+			let who = ensure_signed(origin)?;
+			//let dest: MultiLocation = (*dest).try_into().map_err(|()|
+			// Error::<T>::BadVersion)?; let ancestry = T::LocationInverter::ancestry();
+			let origin_location = T::AccountIdToMultiLocation::convert(who.clone());
+
+			let mut dest_loc: MultiLocation = (1, Parachain(dest_id)).into();
+			dest_loc.append_with(origin_location.clone().interior);
+
+			let mut dest = T::SelfLocation::get();
+			dest.append_with(origin_location.clone().interior);
+
+			Self::do_transfer(
+				who,
+				currency_id,
+				amount,
+				dest_loc.clone(),
+				dest_weight,
+				maybe_transact_call,
+				maybe_transact_fee,
+				Some(dest),
 			)
 		}
 
@@ -400,7 +437,7 @@ pub mod module {
 			// We first grab the fee
 			let fee: &MultiAsset = assets.get(fee_item as usize).ok_or(Error::<T>::AssetIndexNonExistent)?;
 
-			Self::do_transfer_multiassets(who, assets.clone(), fee.clone(), dest, dest_weight, None, None)
+			Self::do_transfer_multiassets(who, assets.clone(), fee.clone(), dest, dest_weight, None, None, None)
 		}
 	}
 
@@ -412,7 +449,9 @@ pub mod module {
 			dest: MultiLocation,
 			dest_weight: Weight,
 			maybe_transact_call: Option<Vec<u8>>,
+			//maybe_transact_call: Option<DoubleEncoded<T::Call>>,
 			maybe_transact_fee: Option<T::Balance>,
+			maybe_recipient_override: Option<MultiLocation>,
 		) -> DispatchResult {
 			let location: MultiLocation =
 				T::CurrencyIdConvert::convert(currency_id).ok_or(Error::<T>::NotCrossChainTransferableCurrency)?;
@@ -429,6 +468,15 @@ pub mod module {
 				_ => None,
 			};
 
+			// //let ancestry = T::LocationInverter::ancestry();
+			// let origin_location = T::AccountIdToMultiLocation::convert(who.clone());
+
+			// let mut dest_loc: MultiLocation = (1, Parachain(2)).into();
+			// dest_loc.append_with(origin_location.clone().interior);
+
+			// let mut dest = T::SelfLocation::get();
+			// dest.append_with(origin_location.clone().interior);
+
 			Self::do_transfer_multiassets(
 				who.clone(),
 				vec![asset.clone()].into(),
@@ -437,6 +485,7 @@ pub mod module {
 				dest_weight,
 				maybe_transact_call.clone(),
 				maybe_transact_fee_asset,
+				maybe_recipient_override,
 			)
 		}
 
@@ -469,7 +518,7 @@ pub mod module {
 			assets.push(asset);
 			assets.push(fee_asset.clone());
 
-			Self::do_transfer_multiassets(who, assets, fee_asset, dest, dest_weight, None, None)
+			Self::do_transfer_multiassets(who, assets, fee_asset, dest, dest_weight, None, None, None)
 		}
 
 		fn do_transfer_multiasset(
@@ -478,7 +527,16 @@ pub mod module {
 			dest: MultiLocation,
 			dest_weight: Weight,
 		) -> DispatchResult {
-			Self::do_transfer_multiassets(who, vec![asset.clone()].into(), asset, dest, dest_weight, None, None)
+			Self::do_transfer_multiassets(
+				who,
+				vec![asset.clone()].into(),
+				asset,
+				dest,
+				dest_weight,
+				None,
+				None,
+				None,
+			)
 		}
 
 		fn do_transfer_multiasset_with_fee(
@@ -493,7 +551,7 @@ pub mod module {
 			assets.push(asset);
 			assets.push(fee.clone());
 
-			Self::do_transfer_multiassets(who, assets, fee, dest, dest_weight, None, None)?;
+			Self::do_transfer_multiassets(who, assets, fee, dest, dest_weight, None, None, None)?;
 
 			Ok(())
 		}
@@ -537,7 +595,7 @@ pub mod module {
 
 			let fee: MultiAsset = (fee_location, (*fee_amount).into()).into();
 
-			Self::do_transfer_multiassets(who, assets, fee, dest, dest_weight, None, None)
+			Self::do_transfer_multiassets(who, assets, fee, dest, dest_weight, None, None, None)
 		}
 
 		fn do_transfer_multiassets(
@@ -547,7 +605,9 @@ pub mod module {
 			dest: MultiLocation,
 			dest_weight: Weight,
 			maybe_transact_call: Option<Vec<u8>>,
+			//maybe_transact_call: Option<DoubleEncoded<T::Call>>,
 			maybe_transact_fee_asset: Option<MultiAsset>,
+			maybe_recipient_override: Option<MultiLocation>,
 		) -> DispatchResult {
 			ensure!(
 				assets.len() <= T::MaxAssetsForTransfer::get(),
@@ -636,39 +696,67 @@ pub mod module {
 					fee.clone(),
 					non_fee_reserve.clone(),
 					&dest,
-					None,
+					maybe_recipient_override,
 					dest_weight,
 				)?;
 			}
 
 			if let Some(call) = maybe_transact_call {
 				if let Some(transact_fee_asset) = maybe_transact_fee_asset {
+					// TODO: is this the best way to get dest location
+					let target_chain_location = dest.chain_part().ok_or(Error::<T>::AssetHasNoReserve)?;
+					let mut self_location_appended = T::SelfLocation::get();
+					let ancestry = T::LocationInverter::ancestry();
+					// let mut self_location_inverted = self_location.clone();
+					// self_location_inverted
+					// 	.reanchor(&target_chain_location, &ancestry)
+					// 	.map_err(|_| Error::<T>::CannotReanchor)?;
+					// self_location_inverted.append_with(origin_location.clone().interior);
+					self_location_appended.append_with(origin_location.clone().interior);
+
 					let mut transact_fee_assets = MultiAssets::new();
 					transact_fee_assets.push(transact_fee_asset.clone());
 					// TODO: do i need this reserve()
 					let transact_fee_reserve = T::ReserveProvider::reserve(&transact_fee_asset);
-					Self::execute_and_send_reserve_kind_xcm(
-						origin_location.clone(),
-						transact_fee_assets.clone(),
-						transact_fee_asset.clone(),
-						transact_fee_reserve.clone(),
-						&dest,
-						// recipient has to be sovereign account of sender chain
-						Some(T::SelfLocation::get()),
-						dest_weight,
-					)?;
+					// Self::execute_and_send_reserve_kind_xcm(
+					// 	origin_location.clone(),
+					// 	transact_fee_assets.clone(),
+					// 	transact_fee_asset.clone(),
+					// 	transact_fee_reserve.clone(),
+					// 	&dest,
+					// 	// recipient has to be sovereign account of sender chain
+					// 	//Some(T::SelfLocation::get()),
+					// 	//Some(origin_location.clone()),
+					// 	//Some(self_location_inverted),
+					// 	Some(self_location_appended),
+					// 	dest_weight,
+					// )?;
 
-					// TODO: is this the best way to get dest location
-					let target_location = dest.chain_part().ok_or(Error::<T>::AssetHasNoReserve)?;
-					let ancestry = T::LocationInverter::ancestry();
 					let transact_fee_asset = transact_fee_asset
 						.clone()
-						.reanchored(&target_location, &ancestry)
+						.reanchored(&target_chain_location, &ancestry)
 						.map_err(|_| Error::<T>::CannotReanchor)?;
 
+					//  MultiLocation {
+					// 	parents: 0,
+					// 	interior: X2(
+					// 		Parachain(origin_location.get_para_id()),
+					// 		AccountId32 {
+					// 			network: NetworkId::Any,
+					// 			id: account.into(),
+					// 		},
+					// 	),
+					// 	// X1(AccountId32 {
+					// 	// 	network: NetworkId::Any,
+					// 	// 	id: account.into(),
+					// 	// }),
+					// };
+
+					//let double_encoded: DoubleEncoded<T::Call> = call.into();
 					let mut transact_fee_assets = MultiAssets::new();
 					transact_fee_assets.push(transact_fee_asset.clone());
 					let instructions = Xcm(vec![
+						DescendOrigin(origin_location.clone().interior),
 						WithdrawAsset(transact_fee_assets),
 						BuyExecution {
 							fees: transact_fee_asset,
@@ -679,13 +767,14 @@ pub mod module {
 							origin_type: OriginKind::SovereignAccount,
 							require_weight_at_most: dest_weight,
 							call: call.into(),
+							//call,
 						},
 						// TODO:
 						// RefundSurplus
 						// DepositAsset(user_account or back to sovereign_account)
 					]);
 
-					let _res = T::XcmSender::send_xcm(target_location.clone(), instructions);
+					let _res = T::XcmSender::send_xcm(target_chain_location.clone(), instructions);
 				}
 			}
 
@@ -863,6 +952,7 @@ pub mod module {
 			let (dest, recipient) = Self::ensure_valid_dest(dest)?;
 
 			let self_location = T::SelfLocation::get();
+			// TODO: skip check
 			ensure!(dest != self_location, Error::<T>::NotCrossChainTransfer);
 			let reserve = reserve.ok_or(Error::<T>::AssetHasNoReserve)?;
 			let transfer_kind = if reserve == self_location {
@@ -1016,6 +1106,7 @@ pub mod module {
 			dest: MultiLocation,
 			dest_weight: Weight,
 			maybe_transact_call: Option<Vec<u8>>,
+			//maybe_transact_call: Option<DoubleEncoded<T::Call>>,
 			maybe_transact_fee: T::Balance,
 		) -> DispatchResult {
 			Self::do_transfer(
@@ -1026,6 +1117,7 @@ pub mod module {
 				dest_weight,
 				maybe_transact_call,
 				Some(maybe_transact_fee),
+				None,
 			)
 		}
 
