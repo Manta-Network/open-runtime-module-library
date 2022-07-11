@@ -349,7 +349,7 @@ pub mod module {
 			Self::do_transfer_multicurrencies(who, currencies, fee_item, dest, dest_weight)
 		}
 
-		#[pallet::weight(0)]
+		#[pallet::weight(Pallet::<T>::weight_of_send_transact())]
 		#[transactional]
 		pub fn transact(
 			origin: OriginFor<T>,
@@ -366,13 +366,13 @@ pub mod module {
 			Self::do_transact(who, currency_id, transact_fee, dest_id, dest_weight, encoded_call_data)
 		}
 
-		#[pallet::weight(0)]
+		#[pallet::weight(Pallet::<T>::weight_of_transfer_with_transact(currency_id.clone(), *amount, *dest_chain_id))]
 		#[transactional]
 		pub fn transfer_with_transact(
 			origin: OriginFor<T>,
 			currency_id: T::CurrencyId,
 			amount: T::Balance,
-			dest_id: u32,
+			dest_chain_id: u32,
 			dest_weight: Weight,
 			encoded_call_data: BoundedVec<u8, T::MaxTransactSize>,
 			transact_fee: T::Balance,
@@ -385,7 +385,7 @@ pub mod module {
 				who,
 				currency_id,
 				amount,
-				dest_id,
+				dest_chain_id,
 				dest_weight,
 				encoded_call_data,
 				transact_fee,
@@ -993,6 +993,29 @@ pub mod module {
 			if let Some(location) = T::CurrencyIdConvert::convert(currency_id) {
 				let asset = (location, amount.into()).into();
 				Self::weight_of_transfer_multiasset(&asset, dest)
+			} else {
+				0
+			}
+		}
+
+		/// Returns weight of `send_transact` call.
+		fn weight_of_send_transact() -> Weight {
+			let mut msg = Xcm(vec![]);
+			return T::Weigher::weight(&mut msg)
+				.map_or(Weight::max_value(), |w| T::BaseXcmWeight::get().saturating_add(w));
+		}
+
+		/// Returns weight of `transfer_with_transact` call.
+		fn weight_of_transfer_with_transact(
+			currency_id: T::CurrencyId,
+			amount: T::Balance,
+			dest_chain_id: u32,
+		) -> Weight {
+			let dest_chain_location: MultiLocation = (1, Parachain(dest_chain_id)).into();
+			if let Some(location) = T::CurrencyIdConvert::convert(currency_id) {
+				let asset = (location, amount.into()).into();
+				Self::weight_of_transfer_multiasset(&asset, &VersionedMultiLocation::V1(dest_chain_location))
+					+ Self::weight_of_send_transact()
 			} else {
 				0
 			}
