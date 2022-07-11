@@ -119,6 +119,8 @@ pub mod module {
 		type ReserveProvider: Reserve;
 
 		type XcmSender: SendXcm;
+
+		#[pallet::constant]
 		type MaxTransactSize: Get<u32>;
 	}
 
@@ -178,6 +180,8 @@ pub mod module {
 		NotSupportedMultiLocation,
 		/// MinXcmFee not registered for certain reserve location
 		MinXcmFeeNotDefined,
+		SendFailure,
+		TransactTooLarge,
 	}
 
 	#[pallet::hooks]
@@ -355,9 +359,11 @@ pub mod module {
 			encoded_call_data: BoundedVec<u8, T::MaxTransactSize>,
 			transact_fee: T::Balance,
 		) -> DispatchResult {
+			ensure!(T::MaxTransactSize::get() <= 256u32, Error::<T>::TransactTooLarge);
+
 			let who = ensure_signed(origin)?;
 
-			Self::do_transact(who, currency_id, dest_id, dest_weight, encoded_call_data, transact_fee)
+			Self::do_transact(who, currency_id, transact_fee, dest_id, dest_weight, encoded_call_data)
 		}
 
 		#[pallet::weight(0)]
@@ -371,6 +377,8 @@ pub mod module {
 			encoded_call_data: BoundedVec<u8, T::MaxTransactSize>,
 			transact_fee: T::Balance,
 		) -> DispatchResult {
+			ensure!(T::MaxTransactSize::get() <= 256u32, Error::<T>::TransactTooLarge);
+
 			let who = ensure_signed(origin)?;
 
 			Self::do_transfer_with_transact(
@@ -422,74 +430,27 @@ pub mod module {
 	impl<T: Config> Pallet<T> {
 		fn do_transact(
 			who: T::AccountId,
-			currency_id: T::CurrencyId,
+			transact_currency_id: T::CurrencyId,
+			transact_fee_amount: T::Balance,
 			dest_chain_id: u32,
 			dest_weight: Weight,
 			encoded_call_data: BoundedVec<u8, T::MaxTransactSize>,
-			transact_fee: T::Balance,
 		) -> DispatchResult {
-			let location: MultiLocation =
-				T::CurrencyIdConvert::convert(currency_id).ok_or(Error::<T>::NotCrossChainTransferableCurrency)?;
+			let transact_fee_location: MultiLocation = T::CurrencyIdConvert::convert(transact_currency_id)
+				.ok_or(Error::<T>::NotCrossChainTransferableCurrency)?;
 
 			let origin_location = T::AccountIdToMultiLocation::convert(who.clone());
-			let mut dest_chain_location: MultiLocation = (1, Parachain(dest_chain_id)).into();
-			// // Need to append some interior to pass is_valid check later on.
-			// // Only the chain part is needed for everything else.
-			// let _ = dest_chain_location.append_with(origin_location.clone().interior);
+			let dest_chain_location: MultiLocation = (1, Parachain(dest_chain_id)).into();
 
-			// ensure!(!amount.is_zero(), Error::<T>::ZeroAmount);
-			// ensure!(
-			// 	T::MultiLocationsFilter::contains(&dest_chain_location),
-			// 	Error::<T>::NotSupportedMultiLocation
-			// );
-
-			// let transfer_asset: MultiAsset = (location.clone(), amount.into()).into();
-
-			// let mut override_recipient = T::SelfLocation::get();
-			// let _ = override_recipient.append_with(origin_location.clone().interior);
-
-			// let _ = Self::do_transfer_multiassets(
-			// 	who.clone(),
-			// 	vec![transfer_asset.clone()].into(),
-			// 	transfer_asset,
-			// 	dest_chain_location.clone(),
-			// 	dest_weight,
-			// 	Some(override_recipient.clone()),
-			// );
-
-			let transact_fee_asset: MultiAsset = (location, transact_fee.into()).into();
-
-			// We can get rid of the interior now.
-			dest_chain_location = dest_chain_location.chain_part().ok_or(Error::<T>::InvalidDest)?;
-			let ancestry = T::LocationInverter::ancestry();
-			let transact_fee_asset = transact_fee_asset
-				.clone()
-				.reanchored(&dest_chain_location, &ancestry)
-				.map_err(|_| Error::<T>::CannotReanchor)?;
-
-			let mut transact_fee_assets = MultiAssets::new();
-			transact_fee_assets.push(transact_fee_asset.clone());
-			let instructions = Xcm(vec![
-				DescendOrigin(origin_location.clone().interior),
-				WithdrawAsset(transact_fee_assets.clone()),
-				BuyExecution {
-					fees: transact_fee_asset,
-					weight_limit: WeightLimit::Limited(dest_weight),
-				},
-				Transact {
-					origin_type: OriginKind::SovereignAccount,
-					require_weight_at_most: dest_weight,
-					call: encoded_call_data.into_inner().into(),
-				},
-				// RefundSurplus,
-				// DepositAsset {
-				// 	assets: All.into(),
-				// 	max_assets: transact_fee_assets.len() as u32,
-				// 	beneficiary: override_recipient,
-				// },
-			]);
-
-			let _res = T::XcmSender::send_xcm(dest_chain_location, instructions);
+			Self::send_transact(
+				transact_fee_location,
+				transact_fee_amount,
+				dest_chain_location.clone(),
+				origin_location,
+				dest_weight,
+				encoded_call_data,
+				None,
+			)?;
 
 			Ok(())
 		}
@@ -501,9 +462,9 @@ pub mod module {
 			dest_chain_id: u32,
 			dest_weight: Weight,
 			encoded_call_data: BoundedVec<u8, T::MaxTransactSize>,
-			transact_fee: T::Balance,
+			transact_fee_amount: T::Balance,
 		) -> DispatchResult {
-			let location: MultiLocation =
+			let transact_fee_location: MultiLocation =
 				T::CurrencyIdConvert::convert(currency_id).ok_or(Error::<T>::NotCrossChainTransferableCurrency)?;
 
 			let origin_location = T::AccountIdToMultiLocation::convert(who.clone());
@@ -518,24 +479,44 @@ pub mod module {
 				Error::<T>::NotSupportedMultiLocation
 			);
 
-			let transfer_asset: MultiAsset = (location.clone(), amount.into()).into();
-
+			let transfer_asset: MultiAsset = (transact_fee_location.clone(), amount.into()).into();
 			let mut override_recipient = T::SelfLocation::get();
 			let _ = override_recipient.append_with(origin_location.clone().interior);
 
-			let _ = Self::do_transfer_multiassets(
+			Self::do_transfer_multiassets(
 				who.clone(),
 				vec![transfer_asset.clone()].into(),
 				transfer_asset,
 				dest_chain_location.clone(),
 				dest_weight,
 				Some(override_recipient.clone()),
-			);
+			)?;
 
-			let transact_fee_asset: MultiAsset = (location, transact_fee.into()).into();
+			Self::send_transact(
+				transact_fee_location,
+				transact_fee_amount,
+				dest_chain_location.clone(),
+				origin_location,
+				dest_weight,
+				encoded_call_data,
+				Some(override_recipient),
+			)?;
 
+			Ok(())
+		}
+
+		fn send_transact(
+			transact_fee_location: MultiLocation,
+			transact_fee_amount: T::Balance,
+			dest_chain_location: MultiLocation,
+			origin_location: MultiLocation,
+			dest_weight: Weight,
+			encoded_call_data: BoundedVec<u8, T::MaxTransactSize>,
+			override_recipient: Option<MultiLocation>,
+		) -> DispatchResult {
+			let transact_fee_asset: MultiAsset = (transact_fee_location, transact_fee_amount.into()).into();
 			// We can get rid of the interior now.
-			dest_chain_location = dest_chain_location.chain_part().ok_or(Error::<T>::InvalidDest)?;
+			let dest_chain_location = dest_chain_location.chain_part().ok_or(Error::<T>::InvalidDest)?;
 			let ancestry = T::LocationInverter::ancestry();
 			let transact_fee_asset = transact_fee_asset
 				.clone()
@@ -544,7 +525,7 @@ pub mod module {
 
 			let mut transact_fee_assets = MultiAssets::new();
 			transact_fee_assets.push(transact_fee_asset.clone());
-			let instructions = Xcm(vec![
+			let mut instructions = vec![
 				DescendOrigin(origin_location.clone().interior),
 				WithdrawAsset(transact_fee_assets.clone()),
 				BuyExecution {
@@ -557,61 +538,23 @@ pub mod module {
 					require_weight_at_most: dest_weight,
 					call: encoded_call_data.into_inner().into(),
 				},
-				RefundSurplus,
-				DepositAsset {
-					assets: All.into(),
-					max_assets: transact_fee_assets.len() as u32,
-					beneficiary: override_recipient,
-				},
-			]);
+			];
 
-			let _res = T::XcmSender::send_xcm(dest_chain_location, instructions);
+			if let Some(recipient) = override_recipient {
+				instructions.extend(vec![
+					RefundSurplus,
+					DepositAsset {
+						assets: All.into(),
+						max_assets: transact_fee_assets.len() as u32,
+						beneficiary: recipient,
+					},
+				]);
+			}
+
+			T::XcmSender::send_xcm(dest_chain_location, Xcm(instructions)).map_err(|_| Error::<T>::SendFailure)?;
 
 			Ok(())
 		}
-
-		// fn create_transact(
-		// 	asset_location: MultiLocation,
-		// 	transact_fee: T::Balance,
-		// 	dest_chain_location: MultiLocation,
-		// 	origin_location: MultiLocation,
-		// 	override_recipient: MultiLocation,
-		// 	dest_weight: Weight,
-		// 	encoded_call_data: BoundedVec<u8, T::MaxTransactSize>,
-		// ) {
-		// 	let transact_fee_asset: MultiAsset = (asset_location, transact_fee.into()).into();
-
-		// 	// We can get rid of the interior now.
-		// 	let dest_chain_location = dest_chain_location.chain_part().ok_or(Error::<T>::InvalidDest)?;
-		// 	let ancestry = T::LocationInverter::ancestry();
-		// 	let transact_fee_asset = transact_fee_asset
-		// 		.clone()
-		// 		.reanchored(&dest_chain_location, &ancestry)
-		// 		.map_err(|_| Error::<T>::CannotReanchor)?;
-
-		// 	let mut transact_fee_assets = MultiAssets::new();
-		// 	transact_fee_assets.push(transact_fee_asset.clone());
-		// 	let instructions = Xcm(vec![
-		// 		DescendOrigin(origin_location.clone().interior),
-		// 		WithdrawAsset(transact_fee_assets.clone()),
-		// 		BuyExecution {
-		// 			fees: transact_fee_asset,
-		// 			weight_limit: WeightLimit::Limited(dest_weight),
-		// 		},
-		// 		Transact {
-		// 			// SovereignAccount of the user, not the chain
-		// 			origin_type: OriginKind::SovereignAccount,
-		// 			require_weight_at_most: dest_weight,
-		// 			call: encoded_call_data.into_inner().into(),
-		// 		},
-		// 		RefundSurplus,
-		// 		DepositAsset {
-		// 			assets: All.into(),
-		// 			max_assets: transact_fee_assets.len() as u32,
-		// 			beneficiary: override_recipient,
-		// 		},
-		// 	]);
-		// }
 
 		fn do_transfer(
 			who: T::AccountId,
