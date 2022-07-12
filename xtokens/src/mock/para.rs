@@ -2,8 +2,8 @@ use super::{Amount, Balance, CurrencyId, CurrencyIdConvert, ParachainXcmRouter};
 use crate as orml_xtokens;
 
 use frame_support::{
-	construct_runtime, match_types, parameter_types,
-	traits::{ConstU128, ConstU32, ConstU64, Everything, Get, Nothing},
+	construct_runtime, ensure, match_types, parameter_types,
+	traits::{ConstU128, ConstU32, ConstU64, Contains, Everything, Get, Nothing},
 	weights::{constants::WEIGHT_PER_SECOND, Weight},
 };
 use frame_system::EnsureRoot;
@@ -13,17 +13,22 @@ use sp_runtime::{
 	traits::{Convert, IdentityLookup, Zero},
 	AccountId32,
 };
+use sp_std::marker::PhantomData;
 
 use cumulus_primitives_core::{ChannelStatus, GetChannelInfo, ParaId};
 use pallet_xcm::XcmPassthrough;
 use polkadot_parachain::primitives::Sibling;
 use xcm::latest::prelude::*;
 use xcm_builder::{
-	AccountId32Aliases, AllowTopLevelPaidExecutionFrom, EnsureXcmOrigin, FixedWeightBounds, LocationInverter,
-	ParentIsPreset, RelayChainAsNative, SiblingParachainAsNative, SiblingParachainConvertsVia,
-	SignedAccountId32AsNative, SignedToAccountId32, SovereignSignedViaLocation, TakeWeightCredit,
+	Account32Hash, AccountId32Aliases, AllowTopLevelPaidExecutionFrom, AllowUnpaidExecutionFrom, EnsureXcmOrigin,
+	FixedWeightBounds, LocationInverter, ParentIsPreset, RelayChainAsNative, SiblingParachainAsNative,
+	SiblingParachainConvertsVia, SignedAccountId32AsNative, SignedToAccountId32, SovereignSignedViaLocation,
+	TakeWeightCredit,
 };
-use xcm_executor::{traits::WeightTrader, Assets, Config, XcmExecutor};
+use xcm_executor::{
+	traits::{ShouldExecute, WeightTrader},
+	Assets, Config, XcmExecutor,
+};
 
 use orml_traits::{location::AbsoluteReserveProvider, parameter_type_with_key};
 use orml_xcm_support::{IsNativeConcrete, MultiCurrencyAdapter, MultiNativeAsset};
@@ -109,6 +114,7 @@ pub type LocationToAccountId = (
 	ParentIsPreset<AccountId>,
 	SiblingParachainConvertsVia<Sibling, AccountId>,
 	AccountId32Aliases<RelayNetwork, AccountId>,
+	Account32Hash<RelayNetwork, AccountId>,
 );
 
 pub type XcmOriginToCallOrigin = (
@@ -130,8 +136,79 @@ pub type LocalAssetTransactor = MultiCurrencyAdapter<
 	(),
 >;
 
+match_types! {
+	pub type ParentOrFriends: impl Contains<MultiLocation> = {
+		MultiLocation { parents: 1, interior: Here } |
+		MultiLocation { parents: 1, interior: X1(Parachain(1)) } |
+		MultiLocation { parents: 1, interior: X1(Parachain(2)) } |
+		MultiLocation { parents: 1, interior: X1(Parachain(3)) } |
+		MultiLocation { parents: 1, interior: X1(Parachain(4)) }
+	};
+}
+
 pub type XcmRouter = ParachainXcmRouter<ParachainInfo>;
-pub type Barrier = (TakeWeightCredit, AllowTopLevelPaidExecutionFrom<Everything>);
+
+// /// Allows execution from `origin` if it is contained in `T` (i.e.
+// /// `T::Contains(origin)`) taking payments into account.
+// ///
+// /// Only allows for `TeleportAsset`, `WithdrawAsset`, `ClaimAsset` and
+// /// `ReserveAssetDeposit` XCMs because they are the only ones that place
+// assets /// in the Holding Register to pay for execution.
+// pub struct AllowTopLevelPaidExecutionFrom<T>(PhantomData<T>);
+// impl<T: Contains<MultiLocation>> ShouldExecute for
+// AllowTopLevelPaidExecutionFrom<T> { 	fn should_execute<Call>(
+// 		origin: &MultiLocation,
+// 		message: &mut Xcm<Call>,
+// 		max_weight: Weight,
+// 		_weight_credit: &mut Weight,
+// 	) -> Result<(), ()> {
+// 		// log::trace!(
+// 		// 	target: "xcm::barriers",
+// 		// 	"AllowTopLevelPaidExecutionFrom origin: {:?}, message: {:?}, max_weight:
+// 		// {:?}, weight_credit: {:?}", 	origin, message, max_weight, _weight_credit,
+// 		// );
+// 		ensure!(T::contains(origin), ());
+// 		let mut iter = message.0.iter_mut();
+// 		let i = iter.next().ok_or(())?;
+// 		match i {
+// 			ReceiveTeleportedAsset(..)
+// 			| WithdrawAsset(..)
+// 			| ReserveAssetDeposited(..)
+// 			| ClaimAsset { .. }
+// 			| Transact { .. } => (),
+// 			_ => return Err(()),
+// 		}
+// 		let mut i = iter.next().ok_or(())?;
+// 		while let ClearOrigin = i {
+// 			i = iter.next().ok_or(())?;
+// 		}
+// 		match i {
+// 			BuyExecution {
+// 				weight_limit: Limited(ref mut weight),
+// 				..
+// 			} if *weight >= max_weight => {
+// 				*weight = max_weight;
+// 				Ok(())
+// 			}
+// 			BuyExecution {
+// 				ref mut weight_limit, ..
+// 			} if weight_limit == &Unlimited => {
+// 				*weight_limit = Limited(max_weight);
+// 				Ok(())
+// 			}
+// 			_ => Err(()),
+// 		}
+// 	}
+// }
+pub type Barrier = (
+	TakeWeightCredit,
+	AllowTopLevelPaidExecutionFrom<Everything>,
+	// This has to be after AllowTopLevelPaidExecutionFrom or 2 tests will fail:
+	// tests::sending_sibling_asset_to_reserve_sibling_with_relay_fee_not_enough
+	// tests::sending_sibling_asset_to_reserve_sibling_with_relay_fee_works
+	AllowUnpaidExecutionFrom<ParentOrFriends>,
+);
+//pub type Barrier = AllowUnpaidExecutionFrom<Everything>;
 
 /// A trader who believes all tokens are created equal to "weight" of any chain,
 /// which is not true, but good enough to mock the fee payment of XCM execution.
@@ -154,16 +231,22 @@ impl WeightTrader for AllTokensAreCreatedEqualToWeight {
 			id: asset_id.clone(),
 			fun: Fungible(weight as u128),
 		};
-
+		println!("check 1 \n");
+		println!("required: {:?} \n", required);
 		if let MultiAsset {
 			fun: _,
 			id: Concrete(ref id),
 		} = &required
 		{
 			self.0 = id.clone();
+			println!("id: {:?} \n", id);
 		}
+		println!("check 2 \n");
 
 		let unused = payment.checked_sub(required).map_err(|_| XcmError::TooExpensive)?;
+		println!("check 3 \n");
+		println!("unused: {:?} \n", unused);
+
 		Ok(unused)
 	}
 
@@ -281,6 +364,7 @@ parameter_type_with_key! {
 			_ => None,
 		}
 	};
+
 }
 
 impl orml_xtokens::Config for Runtime {
@@ -298,6 +382,8 @@ impl orml_xtokens::Config for Runtime {
 	type LocationInverter = LocationInverter<Ancestry>;
 	type MaxAssetsForTransfer = MaxAssetsForTransfer;
 	type ReserveProvider = AbsoluteReserveProvider;
+	type XcmSender = XcmRouter;
+	type MaxTransactSize = ConstU32<256>;
 }
 
 impl orml_xcm::Config for Runtime {

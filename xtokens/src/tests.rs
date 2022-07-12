@@ -3,7 +3,7 @@
 use super::*;
 use codec::Encode;
 use cumulus_primitives_core::ParaId;
-use frame_support::{assert_err, assert_noop, assert_ok, traits::Currency};
+use frame_support::{assert_err, assert_noop, assert_ok, traits::Currency, BoundedVec};
 use mock::*;
 use orml_traits::{ConcreteFungibleAsset, MultiCurrency};
 use polkadot_parachain::primitives::Sibling;
@@ -297,6 +297,134 @@ fn send_sibling_asset_to_reserve_sibling() {
 	ParaA::execute_with(|| {
 		assert_eq!(ParaTokens::free_balance(CurrencyId::A, &sibling_b_account()), 500);
 		assert_eq!(ParaTokens::free_balance(CurrencyId::A, &ALICE), 460);
+	});
+}
+
+#[test]
+fn transfer_with_transact_self_reserve_sibling() {
+	TestNet::reset();
+
+	ParaA::execute_with(|| {
+		assert_ok!(ParaTokens::deposit(CurrencyId::A, &ALICE, 100_000));
+	});
+
+	// ParaB::execute_with(|| {
+	// 	assert_ok!(ParaTokens::deposit(CurrencyId::B, &sibling_a_account(),
+	// 100_000)); 	assert_ok!(ParaTokens::deposit(CurrencyId::A, &BOB, 100_000));
+	// });
+
+	let remark = para::Call::System(frame_system::Call::<para::Runtime>::remark_with_event { remark: vec![1, 2, 3] });
+	let encoded_call: Vec<u8> = remark.encode().into();
+	let bounded_vec = BoundedVec::try_from(encoded_call).unwrap();
+
+	ParaA::execute_with(|| {
+		assert_ok!(ParaXTokens::transfer_with_transact(
+			Some(ALICE).into(),
+			CurrencyId::A,
+			50_000,
+			2, // PARA_B_ID,
+			4_000,
+			bounded_vec.clone(),
+			// Will cost at 3_000
+			10_000
+		));
+
+		assert_eq!(ParaTokens::free_balance(CurrencyId::A, &ALICE), 50_000);
+	});
+
+	ParaB::execute_with(|| {
+		assert!(para::System::events()
+			.iter()
+			.any(|r| matches!(r.event, para::Event::System(frame_system::Event::Remarked { .. }))));
+
+		// assert_eq!(ParaTokens::free_balance(CurrencyId::A, &ALICE), 50_000);
+		// assert_eq!(ParaTokens::free_balance(CurrencyId::B, &BOB), 460);
+	});
+}
+
+#[test]
+fn transfer_with_transact_to_non_reserve_sibling() {
+	TestNet::reset();
+
+	ParaA::execute_with(|| {
+		assert_eq!(ParaTokens::free_balance(CurrencyId::R, &ALICE), 1_000);
+		assert_ok!(ParaTokens::deposit(CurrencyId::R, &ALICE, 100_000));
+	});
+
+	Relay::execute_with(|| {
+		let _ = RelayBalances::deposit_creating(&para_a_account(), 100_000);
+	});
+
+	let remark = para::Call::System(frame_system::Call::<para::Runtime>::remark_with_event { remark: vec![1, 2, 3] });
+	let encoded_call: Vec<u8> = remark.encode().into();
+	let bounded_vec = BoundedVec::try_from(encoded_call).unwrap();
+
+	ParaA::execute_with(|| {
+		assert_ok!(ParaXTokens::transfer_with_transact(
+			Some(ALICE).into(),
+			CurrencyId::R,
+			50_000,
+			2, // PARA_B_ID,
+			4_000,
+			bounded_vec.clone(),
+			// Will cost at 3_000
+			10_000
+		));
+
+		assert_eq!(ParaTokens::free_balance(CurrencyId::R, &ALICE), 51_000);
+	});
+
+	ParaB::execute_with(|| {
+		assert!(para::System::events()
+			.iter()
+			.any(|r| matches!(r.event, para::Event::System(frame_system::Event::Remarked { .. }))));
+
+		// assert_eq!(ParaTokens::free_balance(CurrencyId::R,
+		// &sibling_a_account()), 50_000);
+		// assert_eq!(ParaTokens::free_balance(CurrencyId::R, &BOB), 460);
+	});
+}
+
+#[test]
+fn transfer_with_transact_to_reserve_sibling() {
+	TestNet::reset();
+
+	ParaA::execute_with(|| {
+		assert_ok!(ParaTokens::deposit(CurrencyId::B, &ALICE, 100_000));
+		assert_ok!(ParaTokens::deposit(CurrencyId::A, &sibling_b_account(), 100_000));
+	});
+
+	ParaB::execute_with(|| {
+		assert_ok!(ParaTokens::deposit(CurrencyId::B, &sibling_a_account(), 100_000));
+		assert_ok!(ParaTokens::deposit(CurrencyId::A, &BOB, 100_000));
+	});
+
+	let remark = para::Call::System(frame_system::Call::<para::Runtime>::remark_with_event { remark: vec![1, 2, 3] });
+	let encoded_call: Vec<u8> = remark.encode().into();
+	let bounded_vec = BoundedVec::try_from(encoded_call).unwrap();
+
+	ParaA::execute_with(|| {
+		assert_ok!(ParaXTokens::transfer_with_transact(
+			Some(ALICE).into(),
+			CurrencyId::B,
+			50_000,
+			2, // PARA_B_ID,
+			4_000,
+			bounded_vec.clone(),
+			// Will cost at 3_000
+			10_000
+		));
+
+		assert_eq!(ParaTokens::free_balance(CurrencyId::B, &ALICE), 50_000);
+	});
+
+	ParaB::execute_with(|| {
+		assert!(para::System::events()
+			.iter()
+			.any(|r| matches!(r.event, para::Event::System(frame_system::Event::Remarked { .. }))));
+
+		assert_eq!(ParaTokens::free_balance(CurrencyId::B, &sibling_a_account()), 50_000);
+		// assert_eq!(ParaTokens::free_balance(CurrencyId::B, &BOB), 460);
 	});
 }
 

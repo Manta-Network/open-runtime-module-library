@@ -738,6 +738,7 @@ pub mod module {
 				let mut assets_to_fee_reserve = MultiAssets::new();
 				let asset_to_fee_reserve = subtract_fee(&fee, min_xcm_fee);
 				assets_to_fee_reserve.push(asset_to_fee_reserve.clone());
+				println!("im not here right ?////////////////////////////////  \n");
 
 				// First xcm sent to fee reserve chain and routed to dest chain.
 				Self::execute_and_send_reserve_kind_xcm(
@@ -806,6 +807,7 @@ pub mod module {
 			};
 
 			let weight = T::Weigher::weight(&mut msg).map_err(|()| Error::<T>::UnweighableMessage)?;
+			println!("origin_location: {:?} \n", origin_location);
 			T::XcmExecutor::execute_xcm_in_credit(origin_location, msg, weight, weight)
 				.ensure_complete()
 				.map_err(|error| {
