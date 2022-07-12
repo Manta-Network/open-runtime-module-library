@@ -324,7 +324,7 @@ fn transfer_with_transact_self_reserve_sibling() {
 			50_000,
 			2, // PARA_B_ID,
 			4_000,
-			bounded_vec.clone(),
+			bounded_vec,
 			// Will cost at 3_000
 			10_000
 		));

@@ -530,7 +530,9 @@ pub mod module {
 				WithdrawAsset(transact_fee_assets.clone()),
 				BuyExecution {
 					fees: transact_fee_asset,
-					weight_limit: WeightLimit::Limited(dest_weight),
+					// TODO: make it work with Limited...
+					// weight_limit: WeightLimit::Limited(dest_weight),
+					weight_limit: WeightLimit::Unlimited,
 				},
 				Transact {
 					// SovereignAccount of the user, not the chain

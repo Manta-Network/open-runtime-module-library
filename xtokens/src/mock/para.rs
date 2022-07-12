@@ -148,65 +148,76 @@ match_types! {
 
 pub type XcmRouter = ParachainXcmRouter<ParachainInfo>;
 
-// /// Allows execution from `origin` if it is contained in `T` (i.e.
-// /// `T::Contains(origin)`) taking payments into account.
-// ///
-// /// Only allows for `TeleportAsset`, `WithdrawAsset`, `ClaimAsset` and
-// /// `ReserveAssetDeposit` XCMs because they are the only ones that place
-// assets /// in the Holding Register to pay for execution.
-// pub struct AllowTopLevelPaidExecutionFrom<T>(PhantomData<T>);
-// impl<T: Contains<MultiLocation>> ShouldExecute for
-// AllowTopLevelPaidExecutionFrom<T> { 	fn should_execute<Call>(
-// 		origin: &MultiLocation,
-// 		message: &mut Xcm<Call>,
-// 		max_weight: Weight,
-// 		_weight_credit: &mut Weight,
-// 	) -> Result<(), ()> {
-// 		// log::trace!(
-// 		// 	target: "xcm::barriers",
-// 		// 	"AllowTopLevelPaidExecutionFrom origin: {:?}, message: {:?}, max_weight:
-// 		// {:?}, weight_credit: {:?}", 	origin, message, max_weight, _weight_credit,
-// 		// );
-// 		ensure!(T::contains(origin), ());
-// 		let mut iter = message.0.iter_mut();
-// 		let i = iter.next().ok_or(())?;
-// 		match i {
-// 			ReceiveTeleportedAsset(..)
-// 			| WithdrawAsset(..)
-// 			| ReserveAssetDeposited(..)
-// 			| ClaimAsset { .. }
-// 			| Transact { .. } => (),
-// 			_ => return Err(()),
-// 		}
-// 		let mut i = iter.next().ok_or(())?;
-// 		while let ClearOrigin = i {
-// 			i = iter.next().ok_or(())?;
-// 		}
-// 		match i {
-// 			BuyExecution {
-// 				weight_limit: Limited(ref mut weight),
-// 				..
-// 			} if *weight >= max_weight => {
-// 				*weight = max_weight;
-// 				Ok(())
-// 			}
-// 			BuyExecution {
-// 				ref mut weight_limit, ..
-// 			} if weight_limit == &Unlimited => {
-// 				*weight_limit = Limited(max_weight);
-// 				Ok(())
-// 			}
-// 			_ => Err(()),
-// 		}
-// 	}
-// }
+/// Allows execution from `origin` if it is contained in `T` (i.e.
+/// `T::Contains(origin)`) taking payments into account.
+///
+/// Only allows for `TeleportAsset`, `WithdrawAsset`, `ClaimAsset` and
+/// `ReserveAssetDeposit` XCMs because they are the only ones that place
+/// assets in the Holding Register to pay for execution.
+pub struct AllowTransactFrom<T>(PhantomData<T>);
+impl<T: Contains<MultiLocation>> ShouldExecute for AllowTransactFrom<T> {
+	fn should_execute<Call>(
+		origin: &MultiLocation,
+		message: &mut Xcm<Call>,
+		max_weight: Weight,
+		_weight_credit: &mut Weight,
+	) -> Result<(), ()> {
+		// log::trace!(
+		// 	target: "xcm::barriers",
+		// 	"AllowTopLevelPaidExecutionFrom origin: {:?}, message: {:?}, max_weight:
+		// {:?}, weight_credit: {:?}", 	origin, message, max_weight, _weight_credit,
+		// );
+		println!("AllowTransactFrom message: {:?} \n", message);
+		println!("AllowTransactFrom max_weight: {:?} \n", max_weight);
+		ensure!(T::contains(origin), ());
+
+		let mut iter = message.0.iter_mut();
+		let i = iter.next().ok_or(())?;
+		println!("AllowTransactFrom 1");
+		// TODO: maybe check that we're not descending into Here
+		match i {
+			DescendOrigin(..) => (),
+			_ => return Err(()),
+		}
+		let i = iter.next().ok_or(())?;
+		println!("AllowTransactFrom 2");
+		match i {
+			WithdrawAsset(..) => (),
+			_ => return Err(()),
+		}
+		let i = iter.next().ok_or(())?;
+		println!("AllowTransactFrom 3");
+		println!("AllowTransactFrom i: {:?} \n", i);
+		match i {
+			BuyExecution {
+				weight_limit: Limited(ref mut weight),
+				..
+			} if *weight >= max_weight => {
+				*weight = max_weight;
+				Ok(())
+			}
+			BuyExecution {
+				ref mut weight_limit, ..
+			} if weight_limit == &Unlimited => {
+				*weight_limit = Limited(max_weight);
+				Ok(())
+			}
+			_ => {
+				println!("AllowTransactFrom 4");
+
+				Err(())
+			}
+		}
+	}
+}
 pub type Barrier = (
 	TakeWeightCredit,
 	AllowTopLevelPaidExecutionFrom<Everything>,
+	AllowTransactFrom<ParentOrFriends>,
 	// This has to be after AllowTopLevelPaidExecutionFrom or 2 tests will fail:
 	// tests::sending_sibling_asset_to_reserve_sibling_with_relay_fee_not_enough
 	// tests::sending_sibling_asset_to_reserve_sibling_with_relay_fee_works
-	AllowUnpaidExecutionFrom<ParentOrFriends>,
+	// AllowUnpaidExecutionFrom<ParentOrFriends>,
 );
 //pub type Barrier = AllowUnpaidExecutionFrom<Everything>;
 
