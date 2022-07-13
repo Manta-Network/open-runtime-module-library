@@ -442,6 +442,8 @@ pub mod module {
 			let origin_location = T::AccountIdToMultiLocation::convert(who.clone());
 			let dest_chain_location: MultiLocation = (1, Parachain(dest_chain_id)).into();
 
+			let refund_recipient = T::SelfLocation::get();
+
 			Self::send_transact(
 				transact_fee_location,
 				transact_fee_amount,
@@ -449,7 +451,7 @@ pub mod module {
 				origin_location,
 				dest_weight,
 				encoded_call_data,
-				None,
+				refund_recipient,
 			)?;
 
 			Ok(())
@@ -499,7 +501,7 @@ pub mod module {
 				origin_location,
 				dest_weight,
 				encoded_call_data,
-				Some(override_recipient),
+				override_recipient,
 			)?;
 
 			Ok(())
@@ -512,7 +514,7 @@ pub mod module {
 			origin_location: MultiLocation,
 			dest_weight: Weight,
 			encoded_call_data: BoundedVec<u8, T::MaxTransactSize>,
-			override_recipient: Option<MultiLocation>,
+			refund_recipient: MultiLocation,
 		) -> DispatchResult {
 			let transact_fee_asset: MultiAsset = (transact_fee_location, transact_fee_amount.into()).into();
 			// We can get rid of the interior now.
@@ -525,13 +527,11 @@ pub mod module {
 
 			let mut transact_fee_assets = MultiAssets::new();
 			transact_fee_assets.push(transact_fee_asset.clone());
-			let mut instructions = vec![
+			let instructions = vec![
 				DescendOrigin(origin_location.clone().interior),
 				WithdrawAsset(transact_fee_assets.clone()),
 				BuyExecution {
 					fees: transact_fee_asset,
-					// TODO: make it work with Limited...
-					// weight_limit: WeightLimit::Limited(dest_weight),
 					weight_limit: WeightLimit::Limited(dest_weight),
 				},
 				Transact {
@@ -540,18 +540,13 @@ pub mod module {
 					require_weight_at_most: dest_weight,
 					call: encoded_call_data.into_inner().into(),
 				},
+				RefundSurplus,
+				DepositAsset {
+					assets: All.into(),
+					max_assets: transact_fee_assets.len() as u32,
+					beneficiary: refund_recipient,
+				},
 			];
-
-			if let Some(recipient) = override_recipient {
-				instructions.extend(vec![
-					RefundSurplus,
-					DepositAsset {
-						assets: All.into(),
-						max_assets: transact_fee_assets.len() as u32,
-						beneficiary: recipient,
-					},
-				]);
-			}
 
 			T::XcmSender::send_xcm(dest_chain_location, Xcm(instructions)).map_err(|_| Error::<T>::SendFailure)?;
 
