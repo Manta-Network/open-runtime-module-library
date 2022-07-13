@@ -58,6 +58,11 @@ enum TransferKind {
 }
 use TransferKind::*;
 
+// Used for BoundedVector and has to be u32 because of Decode trait bounds.
+// Since it can't be less than u32, opted not to make it a configurable
+// component.
+type MaxEncodedDataLen = ConstU32<256>;
+
 #[frame_support::pallet]
 pub mod module {
 	use super::*;
@@ -119,9 +124,6 @@ pub mod module {
 		type ReserveProvider: Reserve;
 
 		type XcmSender: SendXcm;
-
-		#[pallet::constant]
-		type MaxTransactSize: Get<u32>;
 	}
 
 	#[pallet::event]
@@ -181,7 +183,6 @@ pub mod module {
 		/// MinXcmFee not registered for certain reserve location
 		MinXcmFeeNotDefined,
 		SendFailure,
-		TransactTooLarge,
 	}
 
 	#[pallet::hooks]
@@ -356,12 +357,9 @@ pub mod module {
 			currency_id: T::CurrencyId,
 			dest_id: u32,
 			dest_weight: Weight,
-			encoded_call_data: BoundedVec<u8, T::MaxTransactSize>,
+			encoded_call_data: BoundedVec<u8, MaxEncodedDataLen>,
 			transact_fee: T::Balance,
 		) -> DispatchResult {
-			// TODO: make the limit u8 or hard-code the constant in the ORML code
-			ensure!(T::MaxTransactSize::get() <= 256u32, Error::<T>::TransactTooLarge);
-
 			let who = ensure_signed(origin)?;
 
 			Self::do_transact(who, currency_id, transact_fee, dest_id, dest_weight, encoded_call_data)
@@ -375,12 +373,9 @@ pub mod module {
 			amount: T::Balance,
 			dest_chain_id: u32,
 			dest_weight: Weight,
-			encoded_call_data: BoundedVec<u8, T::MaxTransactSize>,
+			encoded_call_data: BoundedVec<u8, MaxEncodedDataLen>,
 			transact_fee: T::Balance,
 		) -> DispatchResult {
-			// TODO: make the limit u8 or hard-code the constant in the ORML code
-			ensure!(T::MaxTransactSize::get() <= 256u32, Error::<T>::TransactTooLarge);
-
 			let who = ensure_signed(origin)?;
 
 			Self::do_transfer_with_transact(
@@ -436,7 +431,7 @@ pub mod module {
 			transact_fee_amount: T::Balance,
 			dest_chain_id: u32,
 			dest_weight: Weight,
-			encoded_call_data: BoundedVec<u8, T::MaxTransactSize>,
+			encoded_call_data: BoundedVec<u8, MaxEncodedDataLen>,
 		) -> DispatchResult {
 			let transact_fee_location: MultiLocation = T::CurrencyIdConvert::convert(transact_currency_id)
 				.ok_or(Error::<T>::NotCrossChainTransferableCurrency)?;
@@ -444,7 +439,7 @@ pub mod module {
 			let origin_location_interior = T::AccountIdToMultiLocation::convert(who).interior;
 			let dest_chain_location: MultiLocation = (1, Parachain(dest_chain_id)).into();
 			let refund_recipient = T::SelfLocation::get();
-			Self::send_transact(
+			Self::send_transact_message(
 				transact_fee_location,
 				transact_fee_amount,
 				dest_chain_location,
@@ -463,7 +458,7 @@ pub mod module {
 			amount: T::Balance,
 			dest_chain_id: u32,
 			dest_weight: Weight,
-			encoded_call_data: BoundedVec<u8, T::MaxTransactSize>,
+			encoded_call_data: BoundedVec<u8, MaxEncodedDataLen>,
 			transact_fee_amount: T::Balance,
 		) -> DispatchResult {
 			ensure!(!amount.is_zero(), Error::<T>::ZeroAmount);
@@ -495,7 +490,7 @@ pub mod module {
 			)?;
 
 			let dest_chain_location = dest_chain_location.chain_part().ok_or(Error::<T>::InvalidDest)?;
-			Self::send_transact(
+			Self::send_transact_message(
 				transact_fee_location,
 				transact_fee_amount,
 				dest_chain_location,
@@ -508,13 +503,13 @@ pub mod module {
 			Ok(())
 		}
 
-		fn send_transact(
+		fn send_transact_message(
 			transact_fee_location: MultiLocation,
 			transact_fee_amount: T::Balance,
 			dest_chain_location: MultiLocation,
 			origin_location_interior: Junctions,
 			dest_weight: Weight,
-			encoded_call_data: BoundedVec<u8, T::MaxTransactSize>,
+			encoded_call_data: BoundedVec<u8, MaxEncodedDataLen>,
 			refund_recipient: MultiLocation,
 		) -> DispatchResult {
 			let ancestry = T::LocationInverter::ancestry();

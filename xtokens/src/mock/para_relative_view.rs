@@ -326,7 +326,6 @@ impl Convert<MultiAsset, Option<CurrencyId>> for RelativeCurrencyIdConvert {
 parameter_types! {
 	pub SelfLocation: MultiLocation = MultiLocation::here();
 	pub const MaxAssetsForTransfer: usize = 2;
-	pub const MaxTransactSize: u32 = 256;
 }
 
 match_types! {
@@ -367,7 +366,6 @@ impl orml_xtokens::Config for Runtime {
 	type MaxAssetsForTransfer = MaxAssetsForTransfer;
 	type ReserveProvider = RelativeReserveProvider;
 	type XcmSender = XcmRouter;
-	type MaxTransactSize = MaxTransactSize;
 }
 
 impl orml_xcm::Config for Runtime {

@@ -196,7 +196,8 @@ impl<T: Contains<MultiLocation>> ShouldExecute for AllowTransactFrom<T> {
 		}
 		let next_instruction = iter.next().ok_or(())?;
 		match next_instruction {
-			// TODO: can at least check the length of the encoded vec<u8>, need a PR in polkadot for that
+			// TODO: can at least check the length of the encoded vec<u8>, need a PR in polkadot for that.
+			// Also the allowed length could be configurable.
 			// TODO: if possible decode the call and match against a configurable set of allowed calls
 			Transact { .. } => (),
 			_ => return Err(()),
@@ -238,7 +239,6 @@ impl WeightTrader for AllTokensAreCreatedEqualToWeight {
 			.next()
 			.expect("Payment must be something; qed")
 			.0;
-
 		let required = MultiAsset {
 			id: asset_id.clone(),
 			fun: Fungible(weight as u128),
@@ -253,7 +253,6 @@ impl WeightTrader for AllTokensAreCreatedEqualToWeight {
 		}
 
 		let unused = payment.checked_sub(required).map_err(|_| XcmError::TooExpensive)?;
-
 		Ok(unused)
 	}
 
@@ -392,7 +391,6 @@ impl orml_xtokens::Config for Runtime {
 	type MaxAssetsForTransfer = MaxAssetsForTransfer;
 	type ReserveProvider = AbsoluteReserveProvider;
 	type XcmSender = XcmRouter;
-	type MaxTransactSize = ConstU32<256>;
 }
 
 impl orml_xcm::Config for Runtime {
