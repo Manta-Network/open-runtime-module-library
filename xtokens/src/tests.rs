@@ -320,7 +320,8 @@ fn transfer_with_transact_self_reserve_sibling() {
 
 	let transfer_amount = 50_000u128;
 	let transact_fee_amount = 10_000u128;
-	let dest_weight = 4_000;
+	let transfer_dest_weight = 4_000;
+	let transact_dest_weight = 4_000;
 
 	ParaA::execute_with(|| {
 		assert_ok!(ParaXTokens::transfer_with_transact(
@@ -328,9 +329,10 @@ fn transfer_with_transact_self_reserve_sibling() {
 			CurrencyId::A,
 			transfer_amount,
 			2, // PARA_B_ID,
-			dest_weight,
+			transfer_dest_weight,
 			bounded_vec,
-			transact_fee_amount
+			transact_fee_amount,
+			transact_dest_weight,
 		));
 
 		assert_eq!(ParaTokens::free_balance(CurrencyId::A, &ALICE), transfer_amount);
@@ -361,7 +363,7 @@ fn transfer_with_transact_self_reserve_sibling() {
 			ClearOrigin,
 			Transact {
 				origin_type: SovereignAccount,
-				require_weight_at_most: dest_weight,
+				require_weight_at_most: transact_dest_weight,
 				call: vec![].into(),
 			},
 		]);
@@ -397,7 +399,8 @@ fn transfer_with_transact_to_reserve_sibling() {
 
 	let transfer_amount = 50_000u128;
 	let transact_fee_amount = 10_000u128;
-	let dest_weight = 4_000;
+	let transfer_dest_weight = 4_000;
+	let transact_dest_weight = 4_000;
 
 	ParaA::execute_with(|| {
 		assert_ok!(ParaXTokens::transfer_with_transact(
@@ -405,9 +408,10 @@ fn transfer_with_transact_to_reserve_sibling() {
 			CurrencyId::B,
 			transfer_amount,
 			2, // PARA_B_ID,
-			dest_weight,
+			transfer_dest_weight,
 			bounded_vec.clone(),
-			transact_fee_amount
+			transact_fee_amount,
+			transact_dest_weight,
 		));
 
 		assert_eq!(ParaTokens::free_balance(CurrencyId::B, &ALICE), transfer_amount);
@@ -444,7 +448,7 @@ fn transfer_with_transact_to_reserve_sibling() {
 			ClearOrigin,
 			Transact {
 				origin_type: SovereignAccount,
-				require_weight_at_most: dest_weight,
+				require_weight_at_most: transact_dest_weight,
 				call: vec![].into(),
 			},
 		]);
@@ -478,7 +482,8 @@ fn transfer_with_transact_to_non_reserve_sibling() {
 
 	let transfer_amount = 50_000u128;
 	let transact_fee_amount = 10_000u128;
-	let dest_weight = 4_000;
+	let transfer_dest_weight = 4_000;
+	let transact_dest_weight = 4_000;
 
 	ParaA::execute_with(|| {
 		assert_ok!(ParaXTokens::transfer_with_transact(
@@ -486,9 +491,10 @@ fn transfer_with_transact_to_non_reserve_sibling() {
 			CurrencyId::R,
 			transfer_amount,
 			2, // PARA_B_ID,
-			dest_weight,
+			transfer_dest_weight,
 			bounded_vec,
-			transact_fee_amount
+			transact_fee_amount,
+			transact_dest_weight,
 		));
 
 		assert_eq!(ParaTokens::free_balance(CurrencyId::R, &ALICE), transfer_amount + 1_000);
@@ -522,7 +528,7 @@ fn transfer_with_transact_to_non_reserve_sibling() {
 			ClearOrigin,
 			Transact {
 				origin_type: SovereignAccount,
-				require_weight_at_most: dest_weight,
+				require_weight_at_most: transact_dest_weight,
 				call: vec![].into(),
 			},
 		]);

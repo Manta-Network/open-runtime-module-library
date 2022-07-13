@@ -367,9 +367,9 @@ pub mod module {
 		/// dispatched with the user sovereign account as origin. Any surplus
 		/// assets are deposited back into the user sovereign account.
 		///
-		/// `dest_weight` is the weight for XCM execution on the dest chain, and
-		/// it would be charged from the transferred assets. If set below
-		/// requirements, the execution may fail and assets wouldn't be
+		/// `transact_dest_weight` is the weight for XCM execution on the dest
+		/// chain, and it would be charged from the transferred assets. If set
+		/// below requirements, the execution may fail and assets wouldn't be
 		/// received.
 		///
 		/// `encoded_call_data` is the encoded call data of the extrinsic on the
@@ -390,7 +390,7 @@ pub mod module {
 			origin: OriginFor<T>,
 			transact_currency_id: T::CurrencyId,
 			dest_chain_id: u32,
-			dest_weight: Weight,
+			transact_dest_weight: Weight,
 			encoded_call_data: BoundedVec<u8, MaxEncodedDataLen>,
 			transact_fee_amount: T::Balance,
 		) -> DispatchResult {
@@ -401,7 +401,7 @@ pub mod module {
 				transact_currency_id,
 				transact_fee_amount,
 				dest_chain_id,
-				dest_weight,
+				transact_dest_weight,
 				encoded_call_data,
 			)
 		}
@@ -421,9 +421,9 @@ pub mod module {
 		/// dispatched with the user sovereign account as origin. Any surplus
 		/// assets are deposited back into the user sovereign account.
 		///
-		/// `dest_weight` is the weight for XCM execution on the dest chain, and
-		/// it would be charged from the transferred assets. If set below
-		/// requirements, the execution may fail and assets wouldn't be
+		/// `transact_dest_weight` is the weight for XCM execution on the dest
+		/// chain, and it would be charged from the transferred assets. If set
+		/// below requirements, the execution may fail and assets wouldn't be
 		/// received.
 		///
 		/// `encoded_call_data` is the encoded call data of the extrinsic on the
@@ -439,27 +439,30 @@ pub mod module {
 		/// received. Receiving depends on if the XCM message could be delivered
 		/// by the network, and if the receiving chain would handle
 		/// messages correctly.
-		#[pallet::weight(Pallet::<T>::weight_of_transfer_with_transact(currency_id.clone(), *amount, *dest_chain_id))]
+		#[pallet::weight(Pallet::<T>::weight_of_transfer_with_transact(currency_id.clone(), *transfer_amount, *dest_chain_id))]
 		#[transactional]
 		pub fn transfer_with_transact(
 			origin: OriginFor<T>,
 			currency_id: T::CurrencyId,
-			amount: T::Balance,
+			transfer_amount: T::Balance,
 			dest_chain_id: u32,
-			dest_weight: Weight,
+			transfer_dest_weight: Weight,
 			encoded_call_data: BoundedVec<u8, MaxEncodedDataLen>,
-			transact_fee: T::Balance,
+			transact_fee_amount: T::Balance,
+			transact_dest_weight: Weight,
 		) -> DispatchResult {
 			let who = ensure_signed(origin)?;
+			ensure!(transfer_amount >= transact_fee_amount, Error::<T>::FeeNotEnough);
 
 			Self::do_transfer_with_transact(
 				who,
 				currency_id,
-				amount,
+				transfer_amount,
 				dest_chain_id,
-				dest_weight,
+				transfer_dest_weight,
 				encoded_call_data,
-				transact_fee,
+				transact_fee_amount,
+				transact_dest_weight,
 			)
 		}
 
@@ -621,7 +624,7 @@ pub mod module {
 			transact_currency_id: T::CurrencyId,
 			transact_fee_amount: T::Balance,
 			dest_chain_id: u32,
-			dest_weight: Weight,
+			transact_dest_weight: Weight,
 			encoded_call_data: BoundedVec<u8, MaxEncodedDataLen>,
 		) -> DispatchResult {
 			let transact_fee_location: MultiLocation = T::CurrencyIdConvert::convert(transact_currency_id)
@@ -635,7 +638,7 @@ pub mod module {
 				transact_fee_amount,
 				dest_chain_location,
 				origin_location_interior,
-				dest_weight,
+				transact_dest_weight,
 				encoded_call_data,
 				refund_recipient,
 			)?;
@@ -646,13 +649,14 @@ pub mod module {
 		fn do_transfer_with_transact(
 			who: T::AccountId,
 			currency_id: T::CurrencyId,
-			amount: T::Balance,
+			transfer_amount: T::Balance,
 			dest_chain_id: u32,
-			dest_weight: Weight,
+			transfer_dest_weight: Weight,
 			encoded_call_data: BoundedVec<u8, MaxEncodedDataLen>,
 			transact_fee_amount: T::Balance,
+			transact_dest_weight: Weight,
 		) -> DispatchResult {
-			ensure!(!amount.is_zero(), Error::<T>::ZeroAmount);
+			ensure!(!transfer_amount.is_zero(), Error::<T>::ZeroAmount);
 
 			let origin_location = T::AccountIdToMultiLocation::convert(who.clone());
 			let mut dest_chain_location: MultiLocation = (1, Parachain(dest_chain_id)).into();
@@ -668,7 +672,7 @@ pub mod module {
 
 			let transact_fee_location: MultiLocation =
 				T::CurrencyIdConvert::convert(currency_id).ok_or(Error::<T>::NotCrossChainTransferableCurrency)?;
-			let transfer_asset: MultiAsset = (transact_fee_location.clone(), amount.into()).into();
+			let transfer_asset: MultiAsset = (transact_fee_location.clone(), transfer_amount.into()).into();
 			let mut override_recipient = T::SelfLocation::get();
 			let _ = override_recipient.append_with(origin_location_interior.clone());
 			Self::do_transfer_multiassets(
@@ -676,7 +680,7 @@ pub mod module {
 				vec![transfer_asset.clone()].into(),
 				transfer_asset,
 				dest_chain_location.clone(),
-				dest_weight,
+				transfer_dest_weight,
 				Some(override_recipient.clone()),
 			)?;
 
@@ -686,7 +690,7 @@ pub mod module {
 				transact_fee_amount,
 				dest_chain_location,
 				origin_location_interior,
-				dest_weight,
+				transact_dest_weight,
 				encoded_call_data,
 				override_recipient,
 			)?;
@@ -699,7 +703,7 @@ pub mod module {
 			transact_fee_amount: T::Balance,
 			dest_chain_location: MultiLocation,
 			origin_location_interior: Junctions,
-			dest_weight: Weight,
+			transact_dest_weight: Weight,
 			encoded_call_data: BoundedVec<u8, MaxEncodedDataLen>,
 			refund_recipient: MultiLocation,
 		) -> DispatchResult {
@@ -718,12 +722,12 @@ pub mod module {
 				WithdrawAsset(transact_fee_assets),
 				BuyExecution {
 					fees: transact_fee_asset,
-					weight_limit: WeightLimit::Limited(dest_weight),
+					weight_limit: WeightLimit::Limited(transact_dest_weight),
 				},
 				Transact {
 					// SovereignAccount of the user, not the chain
 					origin_type: OriginKind::SovereignAccount,
-					require_weight_at_most: dest_weight,
+					require_weight_at_most: transact_dest_weight,
 					call: encoded_call_data.into_inner().into(),
 				},
 				RefundSurplus,
