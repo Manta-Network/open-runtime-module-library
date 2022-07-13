@@ -195,14 +195,30 @@ impl<T: Contains<MultiLocation>> ShouldExecute for AllowTransactFrom<T> {
 				ref mut weight_limit, ..
 			} => {
 				*weight_limit = Limited(max_weight);
-				Ok(())
 			}
 			_ => {
 				println!("AllowTransactFrom 4");
 
-				Err(())
+				return Err(());
 			}
 		}
+		let i = iter.next().ok_or(())?;
+		match i {
+			Transact { .. } => (),
+			_ => return Err(()),
+		}
+		let i = iter.next().ok_or(())?;
+		match i {
+			RefundSurplus { .. } => (),
+			_ => return Err(()),
+		}
+		let i = iter.next().ok_or(())?;
+		match i {
+			DepositAsset { .. } => (),
+			_ => return Err(()),
+		}
+
+		Ok(())
 	}
 }
 pub type Barrier = (
