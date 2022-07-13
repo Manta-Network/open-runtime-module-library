@@ -194,7 +194,9 @@ impl<T: Contains<MultiLocation>> ShouldExecute for AllowTransactFrom<T> {
 			BuyExecution {
 				weight_limit: Limited(ref mut weight),
 				..
-			} if *weight >= max_weight => {
+			} => {
+				// max_weight will always be more than weight because
+				// max_weight = weight + weigher::weight(incoming_message)
 				*weight = max_weight;
 				Ok(())
 			}

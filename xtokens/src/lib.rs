@@ -532,7 +532,7 @@ pub mod module {
 					fees: transact_fee_asset,
 					// TODO: make it work with Limited...
 					// weight_limit: WeightLimit::Limited(dest_weight),
-					weight_limit: WeightLimit::Unlimited,
+					weight_limit: WeightLimit::Limited(dest_weight),
 				},
 				Transact {
 					// SovereignAccount of the user, not the chain
