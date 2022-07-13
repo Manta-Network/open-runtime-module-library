@@ -109,13 +109,12 @@ parameter_types! {
 	pub Ancestry: MultiLocation = Parachain(ParachainInfo::parachain_id().into()).into();
 }
 
-pub type MyAccount32Hash = Account32Hash<RelayNetwork, AccountId>;
-
+pub type ParaAccount32Hash = Account32Hash<RelayNetwork, AccountId>;
 pub type LocationToAccountId = (
 	ParentIsPreset<AccountId>,
 	SiblingParachainConvertsVia<Sibling, AccountId>,
 	AccountId32Aliases<RelayNetwork, AccountId>,
-	MyAccount32Hash,
+	ParaAccount32Hash,
 );
 
 pub type XcmOriginToCallOrigin = (

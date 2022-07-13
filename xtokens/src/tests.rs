@@ -5,7 +5,7 @@ use codec::Encode;
 use cumulus_primitives_core::ParaId;
 use frame_support::{assert_err, assert_noop, assert_ok, traits::Currency, BoundedVec};
 use mock::{
-	para::{MyAccount32Hash, ParaWeigher},
+	para::{ParaAccount32Hash, ParaWeigher},
 	relay::RelayWeigher,
 	*,
 };
@@ -367,7 +367,7 @@ fn transfer_with_transact_self_reserve_sibling() {
 		]);
 		let transact_msg_weight = ParaWeigher::weight(&mut transact_msg).unwrap() as u128;
 
-		let user_sovereign_account = MyAccount32Hash::convert_ref(&user_multilocaiton).unwrap();
+		let user_sovereign_account = ParaAccount32Hash::convert_ref(&user_multilocaiton).unwrap();
 
 		assert_eq!(
 			ParaTokens::free_balance(CurrencyId::A, &user_sovereign_account),
@@ -450,7 +450,7 @@ fn transfer_with_transact_to_reserve_sibling() {
 		]);
 		let transact_msg_weight = ParaWeigher::weight(&mut transact_msg).unwrap() as u128;
 
-		let user_sovereign_account = MyAccount32Hash::convert_ref(&user_multilocaiton).unwrap();
+		let user_sovereign_account = ParaAccount32Hash::convert_ref(&user_multilocaiton).unwrap();
 		assert_eq!(
 			ParaTokens::free_balance(CurrencyId::B, &user_sovereign_account),
 			// AllTokensAreCreatedEqualToWeight means 1 to 1 mapping of the weight to fee
@@ -528,7 +528,7 @@ fn transfer_with_transact_to_non_reserve_sibling() {
 		]);
 		let transact_msg_weight = ParaWeigher::weight(&mut transact_msg).unwrap() as u128;
 
-		let user_sovereign_account = MyAccount32Hash::convert_ref(&user_multilocaiton).unwrap();
+		let user_sovereign_account = ParaAccount32Hash::convert_ref(&user_multilocaiton).unwrap();
 
 		assert_eq!(
 			ParaTokens::free_balance(CurrencyId::R, &user_sovereign_account),
