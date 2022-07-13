@@ -10,7 +10,7 @@ use frame_system::EnsureRoot;
 use sp_core::H256;
 use sp_runtime::{
 	testing::Header,
-	traits::{Convert, IdentityLookup, Zero},
+	traits::{Convert, IdentityLookup},
 	AccountId32,
 };
 use sp_std::marker::PhantomData;
@@ -21,14 +21,13 @@ use polkadot_parachain::primitives::Sibling;
 use xcm::latest::prelude::*;
 use xcm_builder::{
 	Account32Hash, AccountId32Aliases, AllowTopLevelPaidExecutionFrom, EnsureXcmOrigin, FixedWeightBounds,
-	LocationInverter, ParentIsPreset, RelayChainAsNative, SiblingParachainAsNative, SiblingParachainConvertsVia,
-	SignedAccountId32AsNative, SignedToAccountId32, SovereignSignedViaLocation, TakeWeightCredit,
+	LocationInverter, NativeAsset, ParentIsPreset, RelayChainAsNative, SiblingParachainAsNative,
+	SiblingParachainConvertsVia, SignedAccountId32AsNative, SignedToAccountId32, SovereignSignedViaLocation,
+	TakeWeightCredit,
 };
-use xcm_executor::{
-	traits::{ShouldExecute, WeightTrader},
-	Assets, Config, XcmExecutor,
-};
+use xcm_executor::{traits::ShouldExecute, Config, XcmExecutor};
 
+use crate::mock::AllTokensAreCreatedEqualToWeight;
 use orml_traits::{location::AbsoluteReserveProvider, parameter_type_with_key};
 use orml_xcm_support::{IsNativeConcrete, MultiCurrencyAdapter, MultiNativeAsset};
 
@@ -221,49 +220,6 @@ pub type Barrier = (
 	AllowTransactFrom<ParentOrFriends>,
 );
 
-/// A trader who believes all tokens are created equal to "weight" of any chain,
-/// which is not true, but good enough to mock the fee payment of XCM execution.
-///
-/// This mock will always trade `n` amount of weight to `n` amount of tokens.
-pub struct AllTokensAreCreatedEqualToWeight(MultiLocation);
-impl WeightTrader for AllTokensAreCreatedEqualToWeight {
-	fn new() -> Self {
-		Self(MultiLocation::parent())
-	}
-
-	fn buy_weight(&mut self, weight: Weight, payment: Assets) -> Result<Assets, XcmError> {
-		let asset_id = payment
-			.fungible
-			.iter()
-			.next()
-			.expect("Payment must be something; qed")
-			.0;
-		let required = MultiAsset {
-			id: asset_id.clone(),
-			fun: Fungible(weight as u128),
-		};
-
-		if let MultiAsset {
-			fun: _,
-			id: Concrete(ref id),
-		} = &required
-		{
-			self.0 = id.clone();
-		}
-
-		let unused = payment.checked_sub(required).map_err(|_| XcmError::TooExpensive)?;
-		Ok(unused)
-	}
-
-	fn refund_weight(&mut self, weight: Weight) -> Option<MultiAsset> {
-		if weight.is_zero() {
-			None
-		} else {
-			Some((self.0.clone(), weight as u128).into())
-		}
-	}
-}
-
 pub type ParaWeigher = FixedWeightBounds<ConstU64<10>, Call, ConstU32<100>>;
 
 pub struct XcmConfig;
@@ -273,7 +229,7 @@ impl Config for XcmConfig {
 	type AssetTransactor = LocalAssetTransactor;
 	type OriginConverter = XcmOriginToCallOrigin;
 	type IsReserve = MultiNativeAsset<AbsoluteReserveProvider>;
-	type IsTeleporter = ();
+	type IsTeleporter = NativeAsset;
 	type LocationInverter = LocationInverter<Ancestry>;
 	type Barrier = Barrier;
 	type Weigher = ParaWeigher;
@@ -367,7 +323,7 @@ parameter_type_with_key! {
 	pub ParachainMinFee: |location: MultiLocation| -> Option<u128> {
 		#[allow(clippy::match_ref_pats)] // false positive
 		match (location.parents, location.first_interior()) {
-			(1, Some(Parachain(2))) => Some(40),
+			(1, Some(Parachain(3))) => Some(40),
 			_ => None,
 		}
 	};

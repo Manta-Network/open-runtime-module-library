@@ -90,6 +90,14 @@ pub type Barrier = (TakeWeightCredit, AllowTopLevelPaidExecutionFrom<Everything>
 
 pub type RelayWeigher = FixedWeightBounds<ConstU64<10>, Call, ConstU32<100>>;
 
+parameter_types! {
+	pub const Kusama: MultiAssetFilter = Wild(AllOf { fun: WildFungible, id: Concrete(KsmLocation::get()) });
+	pub const Statemine: MultiLocation = Parachain(3).into();
+	pub const KusamaForStatemine: (MultiAssetFilter, MultiLocation) = (Kusama::get(), Statemine::get());
+}
+
+pub type TrustedTeleporters = xcm_builder::Case<KusamaForStatemine>;
+
 pub struct XcmConfig;
 impl Config for XcmConfig {
 	type Call = Call;
@@ -97,7 +105,7 @@ impl Config for XcmConfig {
 	type AssetTransactor = LocalAssetTransactor;
 	type OriginConverter = LocalOriginConverter;
 	type IsReserve = ();
-	type IsTeleporter = ();
+	type IsTeleporter = TrustedTeleporters;
 	type LocationInverter = LocationInverter<Ancestry>;
 	type Barrier = Barrier;
 	type Weigher = RelayWeigher;
