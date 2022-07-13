@@ -20,10 +20,9 @@ use pallet_xcm::XcmPassthrough;
 use polkadot_parachain::primitives::Sibling;
 use xcm::latest::prelude::*;
 use xcm_builder::{
-	Account32Hash, AccountId32Aliases, AllowTopLevelPaidExecutionFrom, AllowUnpaidExecutionFrom, EnsureXcmOrigin,
-	FixedWeightBounds, LocationInverter, ParentIsPreset, RelayChainAsNative, SiblingParachainAsNative,
-	SiblingParachainConvertsVia, SignedAccountId32AsNative, SignedToAccountId32, SovereignSignedViaLocation,
-	TakeWeightCredit,
+	Account32Hash, AccountId32Aliases, AllowTopLevelPaidExecutionFrom, EnsureXcmOrigin, FixedWeightBounds,
+	LocationInverter, ParentIsPreset, RelayChainAsNative, SiblingParachainAsNative, SiblingParachainConvertsVia,
+	SignedAccountId32AsNative, SignedToAccountId32, SovereignSignedViaLocation, TakeWeightCredit,
 };
 use xcm_executor::{
 	traits::{ShouldExecute, WeightTrader},
@@ -150,12 +149,12 @@ match_types! {
 
 pub type XcmRouter = ParachainXcmRouter<ParachainInfo>;
 
-/// Allows execution from `origin` if it is contained in `T` (i.e.
-/// `T::Contains(origin)`) taking payments into account.
+/// Allows execution of a Transact instruction from `origin` if it is contained
+/// in `T` (i.e. `T::Contains(origin)`) taking payments into account.
 ///
-/// Only allows for `TeleportAsset`, `WithdrawAsset`, `ClaimAsset` and
-/// `ReserveAssetDeposit` XCMs because they are the only ones that place
-/// assets in the Holding Register to pay for execution.
+/// Only allows for a specific set of instructions:
+/// DescendOrigin + WithdrawAsset + BuyExecution + Transact + RefundSurplus +
+/// DepositAsset
 pub struct AllowTransactFrom<T>(PhantomData<T>);
 impl<T: Contains<MultiLocation>> ShouldExecute for AllowTransactFrom<T> {
 	fn should_execute<Call>(
@@ -164,56 +163,51 @@ impl<T: Contains<MultiLocation>> ShouldExecute for AllowTransactFrom<T> {
 		max_weight: Weight,
 		_weight_credit: &mut Weight,
 	) -> Result<(), ()> {
-		// log::trace!(
-		// 	target: "xcm::barriers",
-		// 	"AllowTopLevelPaidExecutionFrom origin: {:?}, message: {:?}, max_weight:
-		// {:?}, weight_credit: {:?}", 	origin, message, max_weight, _weight_credit,
-		// );
-		println!("AllowTransactFrom message: {:?} \n", message);
-		println!("AllowTransactFrom max_weight: {:?} \n", max_weight);
+		log::trace!(
+			target: "xcm::barriers",
+			"AllowTransactFrom origin: {:?}, message: {:?}, max_weight:
+		{:?}, weight_credit: {:?}", 	origin, message, max_weight, _weight_credit,
+		);
+
 		ensure!(T::contains(origin), ());
 
 		let mut iter = message.0.iter_mut();
-		let i = iter.next().ok_or(())?;
-		println!("AllowTransactFrom 1");
+		let next_instruction = iter.next().ok_or(())?;
 		// TODO: maybe check that we're not descending into Here
-		match i {
+		match next_instruction {
 			DescendOrigin(..) => (),
 			_ => return Err(()),
 		}
-		let i = iter.next().ok_or(())?;
-		println!("AllowTransactFrom 2");
-		match i {
+		let next_instruction = iter.next().ok_or(())?;
+		match next_instruction {
 			WithdrawAsset(..) => (),
 			_ => return Err(()),
 		}
-		let i = iter.next().ok_or(())?;
-		println!("AllowTransactFrom 3");
-		println!("AllowTransactFrom i: {:?} \n", i);
-		match i {
+		let next_instruction = iter.next().ok_or(())?;
+		match next_instruction {
 			BuyExecution {
 				ref mut weight_limit, ..
 			} => {
 				*weight_limit = Limited(max_weight);
 			}
 			_ => {
-				println!("AllowTransactFrom 4");
-
 				return Err(());
 			}
 		}
-		let i = iter.next().ok_or(())?;
-		match i {
+		let next_instruction = iter.next().ok_or(())?;
+		match next_instruction {
+			// TODO: can at least check the length of the encoded vec<u8>, need a PR in polkadot for that
+			// TODO: if possible decode the call and match against a configurable set of allowed calls
 			Transact { .. } => (),
 			_ => return Err(()),
 		}
-		let i = iter.next().ok_or(())?;
-		match i {
+		let next_instruction = iter.next().ok_or(())?;
+		match next_instruction {
 			RefundSurplus { .. } => (),
 			_ => return Err(()),
 		}
-		let i = iter.next().ok_or(())?;
-		match i {
+		let next_instruction = iter.next().ok_or(())?;
+		match next_instruction {
 			DepositAsset { .. } => (),
 			_ => return Err(()),
 		}
@@ -225,12 +219,7 @@ pub type Barrier = (
 	TakeWeightCredit,
 	AllowTopLevelPaidExecutionFrom<Everything>,
 	AllowTransactFrom<ParentOrFriends>,
-	// This has to be after AllowTopLevelPaidExecutionFrom or 2 tests will fail:
-	// tests::sending_sibling_asset_to_reserve_sibling_with_relay_fee_not_enough
-	// tests::sending_sibling_asset_to_reserve_sibling_with_relay_fee_works
-	// AllowUnpaidExecutionFrom<ParentOrFriends>,
 );
-//pub type Barrier = AllowUnpaidExecutionFrom<Everything>;
 
 /// A trader who believes all tokens are created equal to "weight" of any chain,
 /// which is not true, but good enough to mock the fee payment of XCM execution.
@@ -249,25 +238,21 @@ impl WeightTrader for AllTokensAreCreatedEqualToWeight {
 			.next()
 			.expect("Payment must be something; qed")
 			.0;
+
 		let required = MultiAsset {
 			id: asset_id.clone(),
 			fun: Fungible(weight as u128),
 		};
-		println!("check 1 \n");
-		println!("required: {:?} \n", required);
+
 		if let MultiAsset {
 			fun: _,
 			id: Concrete(ref id),
 		} = &required
 		{
 			self.0 = id.clone();
-			println!("id: {:?} \n", id);
 		}
-		println!("check 2 \n");
 
 		let unused = payment.checked_sub(required).map_err(|_| XcmError::TooExpensive)?;
-		println!("check 3 \n");
-		println!("unused: {:?} \n", unused);
 
 		Ok(unused)
 	}
@@ -281,7 +266,7 @@ impl WeightTrader for AllTokensAreCreatedEqualToWeight {
 	}
 }
 
-pub type FixedWeigher = FixedWeightBounds<ConstU64<10>, Call, ConstU32<100>>;
+pub type ParaWeigher = FixedWeightBounds<ConstU64<10>, Call, ConstU32<100>>;
 
 pub struct XcmConfig;
 impl Config for XcmConfig {
@@ -293,7 +278,7 @@ impl Config for XcmConfig {
 	type IsTeleporter = ();
 	type LocationInverter = LocationInverter<Ancestry>;
 	type Barrier = Barrier;
-	type Weigher = FixedWeigher;
+	type Weigher = ParaWeigher;
 	type Trader = AllTokensAreCreatedEqualToWeight;
 	type ResponseHandler = ();
 	type AssetTrap = PolkadotXcm;
@@ -344,7 +329,7 @@ impl pallet_xcm::Config for Runtime {
 	type XcmExecutor = XcmExecutor<XcmConfig>;
 	type XcmTeleportFilter = Nothing;
 	type XcmReserveTransferFilter = Everything;
-	type Weigher = FixedWeigher;
+	type Weigher = ParaWeigher;
 	type LocationInverter = LocationInverter<Ancestry>;
 	type Origin = Origin;
 	type Call = Call;
@@ -401,7 +386,7 @@ impl orml_xtokens::Config for Runtime {
 	type MultiLocationsFilter = ParentOrParachains;
 	type MinXcmFee = ParachainMinFee;
 	type XcmExecutor = XcmExecutor<XcmConfig>;
-	type Weigher = FixedWeigher;
+	type Weigher = ParaWeigher;
 	type BaseXcmWeight = ConstU64<100_000_000>;
 	type LocationInverter = LocationInverter<Ancestry>;
 	type MaxAssetsForTransfer = MaxAssetsForTransfer;

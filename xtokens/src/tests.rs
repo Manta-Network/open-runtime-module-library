@@ -5,7 +5,7 @@ use codec::Encode;
 use cumulus_primitives_core::ParaId;
 use frame_support::{assert_err, assert_noop, assert_ok, traits::Currency, BoundedVec};
 use mock::{
-	para::{FixedWeigher, MyAccount32Hash},
+	para::{MyAccount32Hash, ParaWeigher},
 	relay::RelayWeigher,
 	*,
 };
@@ -13,7 +13,6 @@ use orml_traits::{ConcreteFungibleAsset, MultiCurrency};
 use polkadot_parachain::primitives::Sibling;
 use sp_runtime::{traits::AccountIdConversion, AccountId32};
 use xcm::latest::OriginKind::SovereignAccount;
-use xcm_builder::Account32Hash;
 use xcm_executor::traits::Convert;
 use xcm_simulator::TestExt;
 
@@ -319,19 +318,22 @@ fn transfer_with_transact_self_reserve_sibling() {
 	let encoded_call: Vec<u8> = remark.encode().into();
 	let bounded_vec = BoundedVec::try_from(encoded_call).unwrap();
 
+	let transfer_amount = 50_000u128;
+	let transact_fee_amount = 10_000u128;
+	let dest_weight = 4_000;
+
 	ParaA::execute_with(|| {
 		assert_ok!(ParaXTokens::transfer_with_transact(
 			Some(ALICE).into(),
 			CurrencyId::A,
-			50_000,
+			transfer_amount,
 			2, // PARA_B_ID,
-			4_000,
+			dest_weight,
 			bounded_vec,
-			// Will cost at 3_000
-			10_000
+			transact_fee_amount
 		));
 
-		assert_eq!(ParaTokens::free_balance(CurrencyId::A, &ALICE), 50_000);
+		assert_eq!(ParaTokens::free_balance(CurrencyId::A, &ALICE), transfer_amount);
 	});
 
 	ParaB::execute_with(|| {
@@ -349,8 +351,7 @@ fn transfer_with_transact_self_reserve_sibling() {
 			.into();
 
 		let mut token_transfer_msg = Xcm(vec![ClearOrigin, ClearOrigin, ClearOrigin, ClearOrigin]);
-		let token_transfer_weight = FixedWeigher::weight(&mut token_transfer_msg).unwrap();
-		println!("token_transfer_weight: {:?} \n", token_transfer_weight);
+		let token_transfer_weight = ParaWeigher::weight(&mut token_transfer_msg).unwrap() as u128;
 
 		let mut transact_msg = Xcm(vec![
 			ClearOrigin,
@@ -360,23 +361,18 @@ fn transfer_with_transact_self_reserve_sibling() {
 			ClearOrigin,
 			Transact {
 				origin_type: SovereignAccount,
-				require_weight_at_most: 4_000,
+				require_weight_at_most: dest_weight,
 				call: vec![].into(),
 			},
 		]);
-		let transact_msg_weight = FixedWeigher::weight(&mut transact_msg).unwrap();
-		println!("transact_msg_weight: {:?} \n", transact_msg_weight);
+		let transact_msg_weight = ParaWeigher::weight(&mut transact_msg).unwrap() as u128;
 
 		let user_sovereign_account = MyAccount32Hash::convert_ref(&user_multilocaiton).unwrap();
-		// Token transfer --> 50_000 - 40 = 49_960.
-		// Weight is 40 because the token transfer has 4 messages each with 10 weight.
-		// Transact message --> 10_000 - 4_060 = 5_940 refunded.
-		// Weight is 4060 because there are 6 instructions * 10 weight + the 4000
-		// required_weight_at_most in the Transact instruction
-		// Finally --> 50_000 - 40 - 4_060 = 45_900.
+
 		assert_eq!(
 			ParaTokens::free_balance(CurrencyId::A, &user_sovereign_account),
-			50_000u128 - token_transfer_weight as u128 - transact_msg_weight as u128
+			// AllTokensAreCreatedEqualToWeight means 1 to 1 mapping of the weight to fee
+			transfer_amount - token_transfer_weight - transact_msg_weight
 		);
 	});
 }
@@ -399,19 +395,22 @@ fn transfer_with_transact_to_reserve_sibling() {
 	let encoded_call: Vec<u8> = remark.encode().into();
 	let bounded_vec = BoundedVec::try_from(encoded_call).unwrap();
 
+	let transfer_amount = 50_000u128;
+	let transact_fee_amount = 10_000u128;
+	let dest_weight = 4_000;
+
 	ParaA::execute_with(|| {
 		assert_ok!(ParaXTokens::transfer_with_transact(
 			Some(ALICE).into(),
 			CurrencyId::B,
-			50_000,
+			transfer_amount,
 			2, // PARA_B_ID,
-			4_000,
+			dest_weight,
 			bounded_vec.clone(),
-			// Will cost at 3_000
-			10_000
+			transact_fee_amount
 		));
 
-		assert_eq!(ParaTokens::free_balance(CurrencyId::B, &ALICE), 50_000);
+		assert_eq!(ParaTokens::free_balance(CurrencyId::B, &ALICE), transfer_amount);
 	});
 
 	ParaB::execute_with(|| {
@@ -419,7 +418,10 @@ fn transfer_with_transact_to_reserve_sibling() {
 			.iter()
 			.any(|r| matches!(r.event, para::Event::System(frame_system::Event::Remarked { .. }))));
 
-		assert_eq!(ParaTokens::free_balance(CurrencyId::B, &sibling_a_account()), 50_000);
+		assert_eq!(
+			ParaTokens::free_balance(CurrencyId::B, &sibling_a_account()),
+			transfer_amount
+		);
 
 		let user_multilocaiton = (
 			Parent,
@@ -432,8 +434,7 @@ fn transfer_with_transact_to_reserve_sibling() {
 			.into();
 
 		let mut token_transfer_msg = Xcm(vec![ClearOrigin, ClearOrigin, ClearOrigin, ClearOrigin]);
-		let token_transfer_weight = FixedWeigher::weight(&mut token_transfer_msg).unwrap();
-		println!("token_transfer_weight: {:?} \n", token_transfer_weight);
+		let token_transfer_weight = ParaWeigher::weight(&mut token_transfer_msg).unwrap() as u128;
 
 		let mut transact_msg = Xcm(vec![
 			ClearOrigin,
@@ -443,23 +444,17 @@ fn transfer_with_transact_to_reserve_sibling() {
 			ClearOrigin,
 			Transact {
 				origin_type: SovereignAccount,
-				require_weight_at_most: 4_000,
+				require_weight_at_most: dest_weight,
 				call: vec![].into(),
 			},
 		]);
-		let transact_msg_weight = FixedWeigher::weight(&mut transact_msg).unwrap();
-		println!("transact_msg_weight: {:?} \n", transact_msg_weight);
+		let transact_msg_weight = ParaWeigher::weight(&mut transact_msg).unwrap() as u128;
 
 		let user_sovereign_account = MyAccount32Hash::convert_ref(&user_multilocaiton).unwrap();
-		// Token transfer --> 50_000 - 40 = 49_960.
-		// Weight is 40 because the token transfer has 4 messages each with 10 weight.
-		// Transact message --> 10_000 - 4_060 = 5_940 refunded.
-		// Weight is 4060 because there are 6 instructions * 10 weight + the 4000
-		// required_weight_at_most in the Transact instruction
-		// Finally --> 50_000 - 40 - 4_060 = 45_900.
 		assert_eq!(
 			ParaTokens::free_balance(CurrencyId::B, &user_sovereign_account),
-			50_000u128 - token_transfer_weight as u128 - transact_msg_weight as u128
+			// AllTokensAreCreatedEqualToWeight means 1 to 1 mapping of the weight to fee
+			transfer_amount - token_transfer_weight - transact_msg_weight
 		);
 	});
 }
@@ -481,19 +476,22 @@ fn transfer_with_transact_to_non_reserve_sibling() {
 	let encoded_call: Vec<u8> = remark.encode().into();
 	let bounded_vec = BoundedVec::try_from(encoded_call).unwrap();
 
+	let transfer_amount = 50_000u128;
+	let transact_fee_amount = 10_000u128;
+	let dest_weight = 4_000;
+
 	ParaA::execute_with(|| {
 		assert_ok!(ParaXTokens::transfer_with_transact(
 			Some(ALICE).into(),
 			CurrencyId::R,
-			50_000,
+			transfer_amount,
 			2, // PARA_B_ID,
-			4_000,
-			bounded_vec.clone(),
-			// Will cost at 3_000
-			10_000
+			dest_weight,
+			bounded_vec,
+			transact_fee_amount
 		));
 
-		assert_eq!(ParaTokens::free_balance(CurrencyId::R, &ALICE), 51_000);
+		assert_eq!(ParaTokens::free_balance(CurrencyId::R, &ALICE), transfer_amount + 1_000);
 	});
 
 	ParaB::execute_with(|| {
@@ -512,10 +510,9 @@ fn transfer_with_transact_to_non_reserve_sibling() {
 			.into();
 
 		let mut token_transfer_msg = Xcm(vec![ClearOrigin, ClearOrigin, ClearOrigin, ClearOrigin]);
-		let token_transfer_weight = FixedWeigher::weight(&mut token_transfer_msg).unwrap();
-		println!("token_transfer_weight: {:?} \n", token_transfer_weight);
+		let token_transfer_weight = ParaWeigher::weight(&mut token_transfer_msg).unwrap() as u128;
 		let mut token_transfer_msg_on_relay = Xcm(vec![ClearOrigin, ClearOrigin, ClearOrigin, ClearOrigin]);
-		let token_transfer_weight_on_relay = RelayWeigher::weight(&mut token_transfer_msg_on_relay).unwrap();
+		let token_transfer_weight_on_relay = RelayWeigher::weight(&mut token_transfer_msg_on_relay).unwrap() as u128;
 
 		let mut transact_msg = Xcm(vec![
 			ClearOrigin,
@@ -525,31 +522,19 @@ fn transfer_with_transact_to_non_reserve_sibling() {
 			ClearOrigin,
 			Transact {
 				origin_type: SovereignAccount,
-				require_weight_at_most: 4_000,
+				require_weight_at_most: dest_weight,
 				call: vec![].into(),
 			},
 		]);
-		let transact_msg_weight = FixedWeigher::weight(&mut transact_msg).unwrap();
-		println!("transact_msg_weight: {:?} \n", transact_msg_weight);
+		let transact_msg_weight = ParaWeigher::weight(&mut transact_msg).unwrap() as u128;
 
 		let user_sovereign_account = MyAccount32Hash::convert_ref(&user_multilocaiton).unwrap();
-		// Token transfer --> 50_000 - 40 = 49_960.
-		// Weight is 40 because the token transfer has 4 messages each with 10 weight.
-		// Transact message --> 10_000 - 4_060 = 5_940 refunded.
-		// Weight is 4060 because there are 6 instructions * 10 weight + the 4000
-		// required_weight_at_most in the Transact instruction
-		// Finally --> 50_000 - 40 - 4_060 = 45_900.
+
 		assert_eq!(
 			ParaTokens::free_balance(CurrencyId::R, &user_sovereign_account),
-			50_000u128
-				- token_transfer_weight_on_relay as u128
-				- token_transfer_weight as u128
-				- transact_msg_weight as u128
+			// AllTokensAreCreatedEqualToWeight means 1 to 1 mapping of the weight to fee
+			transfer_amount - token_transfer_weight_on_relay - token_transfer_weight - transact_msg_weight
 		);
-
-		// assert_eq!(ParaTokens::free_balance(CurrencyId::R,
-		// &sibling_a_account()), 50_000);
-		// assert_eq!(ParaTokens::free_balance(CurrencyId::R, &BOB), 460);
 	});
 }
 

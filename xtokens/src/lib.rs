@@ -359,6 +359,7 @@ pub mod module {
 			encoded_call_data: BoundedVec<u8, T::MaxTransactSize>,
 			transact_fee: T::Balance,
 		) -> DispatchResult {
+			// TODO: make the limit u8 or hard-code the constant in the ORML code
 			ensure!(T::MaxTransactSize::get() <= 256u32, Error::<T>::TransactTooLarge);
 
 			let who = ensure_signed(origin)?;
@@ -377,6 +378,7 @@ pub mod module {
 			encoded_call_data: BoundedVec<u8, T::MaxTransactSize>,
 			transact_fee: T::Balance,
 		) -> DispatchResult {
+			// TODO: make the limit u8 or hard-code the constant in the ORML code
 			ensure!(T::MaxTransactSize::get() <= 256u32, Error::<T>::TransactTooLarge);
 
 			let who = ensure_signed(origin)?;
@@ -439,16 +441,14 @@ pub mod module {
 			let transact_fee_location: MultiLocation = T::CurrencyIdConvert::convert(transact_currency_id)
 				.ok_or(Error::<T>::NotCrossChainTransferableCurrency)?;
 
-			let origin_location = T::AccountIdToMultiLocation::convert(who.clone());
+			let origin_location_interior = T::AccountIdToMultiLocation::convert(who).interior;
 			let dest_chain_location: MultiLocation = (1, Parachain(dest_chain_id)).into();
-
 			let refund_recipient = T::SelfLocation::get();
-
 			Self::send_transact(
 				transact_fee_location,
 				transact_fee_amount,
-				dest_chain_location.clone(),
-				origin_location,
+				dest_chain_location,
+				origin_location_interior,
 				dest_weight,
 				encoded_call_data,
 				refund_recipient,
@@ -466,27 +466,27 @@ pub mod module {
 			encoded_call_data: BoundedVec<u8, T::MaxTransactSize>,
 			transact_fee_amount: T::Balance,
 		) -> DispatchResult {
-			let transact_fee_location: MultiLocation =
-				T::CurrencyIdConvert::convert(currency_id).ok_or(Error::<T>::NotCrossChainTransferableCurrency)?;
+			ensure!(!amount.is_zero(), Error::<T>::ZeroAmount);
 
 			let origin_location = T::AccountIdToMultiLocation::convert(who.clone());
 			let mut dest_chain_location: MultiLocation = (1, Parachain(dest_chain_id)).into();
-			// Need to append some interior to pass is_valid check later on.
-			// Only the chain part is needed for everything else.
-			let _ = dest_chain_location.append_with(origin_location.clone().interior);
-
-			ensure!(!amount.is_zero(), Error::<T>::ZeroAmount);
+			let origin_location_interior = origin_location.clone().interior;
+			// Need to append some interior to pass the `contains()` check and later the
+			// `is_valid()` check in `do_transfer_multiassets()`. Only the chain part is
+			// needed afterwards.
+			let _ = dest_chain_location.append_with(origin_location_interior.clone());
 			ensure!(
 				T::MultiLocationsFilter::contains(&dest_chain_location),
 				Error::<T>::NotSupportedMultiLocation
 			);
 
+			let transact_fee_location: MultiLocation =
+				T::CurrencyIdConvert::convert(currency_id).ok_or(Error::<T>::NotCrossChainTransferableCurrency)?;
 			let transfer_asset: MultiAsset = (transact_fee_location.clone(), amount.into()).into();
 			let mut override_recipient = T::SelfLocation::get();
-			let _ = override_recipient.append_with(origin_location.clone().interior);
-
+			let _ = override_recipient.append_with(origin_location_interior.clone());
 			Self::do_transfer_multiassets(
-				who.clone(),
+				who,
 				vec![transfer_asset.clone()].into(),
 				transfer_asset,
 				dest_chain_location.clone(),
@@ -494,11 +494,12 @@ pub mod module {
 				Some(override_recipient.clone()),
 			)?;
 
+			let dest_chain_location = dest_chain_location.chain_part().ok_or(Error::<T>::InvalidDest)?;
 			Self::send_transact(
 				transact_fee_location,
 				transact_fee_amount,
-				dest_chain_location.clone(),
-				origin_location,
+				dest_chain_location,
+				origin_location_interior,
 				dest_weight,
 				encoded_call_data,
 				override_recipient,
@@ -511,25 +512,24 @@ pub mod module {
 			transact_fee_location: MultiLocation,
 			transact_fee_amount: T::Balance,
 			dest_chain_location: MultiLocation,
-			origin_location: MultiLocation,
+			origin_location_interior: Junctions,
 			dest_weight: Weight,
 			encoded_call_data: BoundedVec<u8, T::MaxTransactSize>,
 			refund_recipient: MultiLocation,
 		) -> DispatchResult {
-			let transact_fee_asset: MultiAsset = (transact_fee_location, transact_fee_amount.into()).into();
-			// We can get rid of the interior now.
-			let dest_chain_location = dest_chain_location.chain_part().ok_or(Error::<T>::InvalidDest)?;
 			let ancestry = T::LocationInverter::ancestry();
-			let transact_fee_asset = transact_fee_asset
+			let mut transact_fee_asset: MultiAsset = (transact_fee_location, transact_fee_amount.into()).into();
+			transact_fee_asset = transact_fee_asset
 				.clone()
 				.reanchored(&dest_chain_location, &ancestry)
 				.map_err(|_| Error::<T>::CannotReanchor)?;
 
 			let mut transact_fee_assets = MultiAssets::new();
 			transact_fee_assets.push(transact_fee_asset.clone());
+			let transact_fee_assets_len = transact_fee_assets.len();
 			let instructions = vec![
-				DescendOrigin(origin_location.clone().interior),
-				WithdrawAsset(transact_fee_assets.clone()),
+				DescendOrigin(origin_location_interior),
+				WithdrawAsset(transact_fee_assets),
 				BuyExecution {
 					fees: transact_fee_asset,
 					weight_limit: WeightLimit::Limited(dest_weight),
@@ -543,7 +543,7 @@ pub mod module {
 				RefundSurplus,
 				DepositAsset {
 					assets: All.into(),
-					max_assets: transact_fee_assets.len() as u32,
+					max_assets: transact_fee_assets_len as u32,
 					beneficiary: refund_recipient,
 				},
 			];
@@ -735,7 +735,6 @@ pub mod module {
 				let mut assets_to_fee_reserve = MultiAssets::new();
 				let asset_to_fee_reserve = subtract_fee(&fee, min_xcm_fee);
 				assets_to_fee_reserve.push(asset_to_fee_reserve.clone());
-				println!("im not here right ?////////////////////////////////  \n");
 
 				// First xcm sent to fee reserve chain and routed to dest chain.
 				Self::execute_and_send_reserve_kind_xcm(
@@ -804,7 +803,6 @@ pub mod module {
 			};
 
 			let weight = T::Weigher::weight(&mut msg).map_err(|()| Error::<T>::UnweighableMessage)?;
-			println!("origin_location: {:?} \n", origin_location);
 			T::XcmExecutor::execute_xcm_in_credit(origin_location, msg, weight, weight)
 				.ensure_complete()
 				.map_err(|error| {
