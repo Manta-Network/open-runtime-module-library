@@ -2,8 +2,8 @@ use super::{Amount, Balance, CurrencyId, CurrencyIdConvert, ParachainXcmRouter};
 use crate as orml_xtokens;
 
 use frame_support::{
-	construct_runtime, match_types, parameter_types,
-	traits::{ConstU128, ConstU32, ConstU64, Everything, Get, Nothing},
+	construct_runtime, ensure, match_types, parameter_types,
+	traits::{ConstU128, ConstU32, ConstU64, Contains, Everything, Get, Nothing},
 	weights::{constants::WEIGHT_PER_SECOND, Weight},
 };
 use frame_system::EnsureRoot;
@@ -13,17 +13,19 @@ use sp_runtime::{
 	traits::{Convert, IdentityLookup},
 	AccountId32,
 };
+use sp_std::marker::PhantomData;
 
 use cumulus_primitives_core::{ChannelStatus, GetChannelInfo, ParaId};
 use pallet_xcm::XcmPassthrough;
 use polkadot_parachain::primitives::Sibling;
 use xcm::latest::prelude::*;
 use xcm_builder::{
-	AccountId32Aliases, AllowTopLevelPaidExecutionFrom, EnsureXcmOrigin, FixedWeightBounds, LocationInverter,
-	NativeAsset, ParentIsPreset, RelayChainAsNative, SiblingParachainAsNative, SiblingParachainConvertsVia,
-	SignedAccountId32AsNative, SignedToAccountId32, SovereignSignedViaLocation, TakeWeightCredit,
+	Account32Hash, AccountId32Aliases, AllowTopLevelPaidExecutionFrom, EnsureXcmOrigin, FixedWeightBounds,
+	LocationInverter, NativeAsset, ParentIsPreset, RelayChainAsNative, SiblingParachainAsNative,
+	SiblingParachainConvertsVia, SignedAccountId32AsNative, SignedToAccountId32, SovereignSignedViaLocation,
+	TakeWeightCredit,
 };
-use xcm_executor::{Config, XcmExecutor};
+use xcm_executor::{traits::ShouldExecute, Config, XcmExecutor};
 
 use crate::mock::AllTokensAreCreatedEqualToWeight;
 use orml_traits::{location::AbsoluteReserveProvider, parameter_type_with_key};
@@ -106,10 +108,12 @@ parameter_types! {
 	pub Ancestry: MultiLocation = Parachain(ParachainInfo::parachain_id().into()).into();
 }
 
+pub type ParaAccount32Hash = Account32Hash<RelayNetwork, AccountId>;
 pub type LocationToAccountId = (
 	ParentIsPreset<AccountId>,
 	SiblingParachainConvertsVia<Sibling, AccountId>,
 	AccountId32Aliases<RelayNetwork, AccountId>,
+	ParaAccount32Hash,
 );
 
 pub type XcmOriginToCallOrigin = (
@@ -131,8 +135,92 @@ pub type LocalAssetTransactor = MultiCurrencyAdapter<
 	(),
 >;
 
+match_types! {
+	pub type ParentOrFriends: impl Contains<MultiLocation> = {
+		MultiLocation { parents: 1, interior: Here } |
+		MultiLocation { parents: 1, interior: X1(Parachain(1)) } |
+		MultiLocation { parents: 1, interior: X1(Parachain(2)) } |
+		MultiLocation { parents: 1, interior: X1(Parachain(3)) } |
+		MultiLocation { parents: 1, interior: X1(Parachain(4)) }
+	};
+}
+
 pub type XcmRouter = ParachainXcmRouter<ParachainInfo>;
-pub type Barrier = (TakeWeightCredit, AllowTopLevelPaidExecutionFrom<Everything>);
+
+/// Allows execution of a Transact instruction from `origin` if it is contained
+/// in `T` (i.e. `T::Contains(origin)`) taking payments into account.
+///
+/// Only allows for a specific set of instructions:
+/// DescendOrigin + WithdrawAsset + BuyExecution + Transact + RefundSurplus +
+/// DepositAsset
+pub struct AllowTransactFrom<T>(PhantomData<T>);
+impl<T: Contains<MultiLocation>> ShouldExecute for AllowTransactFrom<T> {
+	fn should_execute<Call>(
+		origin: &MultiLocation,
+		message: &mut Xcm<Call>,
+		max_weight: Weight,
+		_weight_credit: &mut Weight,
+	) -> Result<(), ()> {
+		log::trace!(
+			target: "xcm::barriers",
+			"AllowTransactFrom origin: {:?}, message: {:?}, max_weight:
+		{:?}, weight_credit: {:?}", 	origin, message, max_weight, _weight_credit,
+		);
+
+		ensure!(T::contains(origin), ());
+
+		let mut iter = message.0.iter_mut();
+		let next_instruction = iter.next().ok_or(())?;
+		// TODO: maybe check that we're not descending into Here
+		match next_instruction {
+			DescendOrigin(..) => (),
+			_ => return Err(()),
+		}
+		let next_instruction = iter.next().ok_or(())?;
+		match next_instruction {
+			WithdrawAsset(..) => (),
+			_ => return Err(()),
+		}
+		let next_instruction = iter.next().ok_or(())?;
+		match next_instruction {
+			BuyExecution {
+				ref mut weight_limit, ..
+			} => {
+				*weight_limit = Limited(max_weight);
+			}
+			_ => {
+				return Err(());
+			}
+		}
+		let next_instruction = iter.next().ok_or(())?;
+		match next_instruction {
+			// TODO: can at least check the length of the encoded vec<u8>, need a PR in polkadot for that.
+			// Also the allowed length could be configurable.
+			// TODO: if possible decode the call and match against a configurable set of allowed calls
+			Transact { .. } => (),
+			_ => return Err(()),
+		}
+		let next_instruction = iter.next().ok_or(())?;
+		match next_instruction {
+			RefundSurplus { .. } => (),
+			_ => return Err(()),
+		}
+		let next_instruction = iter.next().ok_or(())?;
+		match next_instruction {
+			DepositAsset { .. } => (),
+			_ => return Err(()),
+		}
+
+		Ok(())
+	}
+}
+pub type Barrier = (
+	TakeWeightCredit,
+	AllowTopLevelPaidExecutionFrom<Everything>,
+	AllowTransactFrom<ParentOrFriends>,
+);
+
+pub type ParaWeigher = FixedWeightBounds<ConstU64<10>, Call, ConstU32<100>>;
 
 pub struct XcmConfig;
 impl Config for XcmConfig {
@@ -144,7 +232,7 @@ impl Config for XcmConfig {
 	type IsTeleporter = NativeAsset;
 	type LocationInverter = LocationInverter<Ancestry>;
 	type Barrier = Barrier;
-	type Weigher = FixedWeightBounds<ConstU64<10>, Call, ConstU32<100>>;
+	type Weigher = ParaWeigher;
 	type Trader = AllTokensAreCreatedEqualToWeight;
 	type ResponseHandler = ();
 	type AssetTrap = PolkadotXcm;
@@ -195,7 +283,7 @@ impl pallet_xcm::Config for Runtime {
 	type XcmExecutor = XcmExecutor<XcmConfig>;
 	type XcmTeleportFilter = Nothing;
 	type XcmReserveTransferFilter = Everything;
-	type Weigher = FixedWeightBounds<ConstU64<10>, Call, ConstU32<100>>;
+	type Weigher = ParaWeigher;
 	type LocationInverter = LocationInverter<Ancestry>;
 	type Origin = Origin;
 	type Call = Call;
@@ -239,6 +327,7 @@ parameter_type_with_key! {
 			_ => None,
 		}
 	};
+
 }
 
 impl orml_xtokens::Config for Runtime {
@@ -251,11 +340,12 @@ impl orml_xtokens::Config for Runtime {
 	type MultiLocationsFilter = ParentOrParachains;
 	type MinXcmFee = ParachainMinFee;
 	type XcmExecutor = XcmExecutor<XcmConfig>;
-	type Weigher = FixedWeightBounds<ConstU64<10>, Call, ConstU32<100>>;
+	type Weigher = ParaWeigher;
 	type BaseXcmWeight = ConstU64<100_000_000>;
 	type LocationInverter = LocationInverter<Ancestry>;
 	type MaxAssetsForTransfer = MaxAssetsForTransfer;
 	type ReserveProvider = AbsoluteReserveProvider;
+	type XcmSender = XcmRouter;
 }
 
 impl orml_xcm::Config for Runtime {

@@ -11,6 +11,7 @@ edition = "2021"
 scale-info = { version = "2.1.2", default-features = false, features = ["derive"] }
 serde = { version = "1.0.136", optional = true }
 codec = { package = "parity-scale-codec", version = "3.0.0", default-features = false }
+log = "0.4.16"
 
 # substrate
 sp-runtime = { git = "https://github.com/paritytech/substrate", default-features = false , branch = "polkadot-v0.9.26" }
@@ -59,6 +60,7 @@ std = [
 	"serde",
 	"codec/std",
 	"scale-info/std",
+	"log/std",
 	"sp-runtime/std",
 	"sp-std/std",
 	"sp-io/std",

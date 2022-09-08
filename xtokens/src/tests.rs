@@ -3,11 +3,17 @@
 use super::*;
 use codec::Encode;
 use cumulus_primitives_core::ParaId;
-use frame_support::{assert_err, assert_noop, assert_ok, traits::Currency};
-use mock::*;
+use frame_support::{assert_err, assert_noop, assert_ok, traits::Currency, BoundedVec};
+use mock::{
+	para::{ParaAccount32Hash, ParaWeigher},
+	relay::RelayWeigher,
+	*,
+};
 use orml_traits::{ConcreteFungibleAsset, MultiCurrency};
 use polkadot_parachain::primitives::Sibling;
 use sp_runtime::{traits::AccountIdConversion, AccountId32};
+use xcm::latest::OriginKind::SovereignAccount;
+use xcm_executor::traits::Convert;
 use xcm_simulator::TestExt;
 
 fn para_a_account() -> AccountId32 {
@@ -297,6 +303,244 @@ fn send_sibling_asset_to_reserve_sibling() {
 	ParaA::execute_with(|| {
 		assert_eq!(ParaTokens::free_balance(CurrencyId::A, &sibling_b_account()), 500);
 		assert_eq!(ParaTokens::free_balance(CurrencyId::A, &ALICE), 460);
+	});
+}
+
+#[test]
+fn transfer_with_transact_self_reserve_sibling() {
+	TestNet::reset();
+
+	ParaA::execute_with(|| {
+		assert_ok!(ParaTokens::deposit(CurrencyId::A, &ALICE, 100_000));
+	});
+
+	let remark = para::Call::System(frame_system::Call::<para::Runtime>::remark_with_event { remark: vec![1, 2, 3] });
+	let encoded_call: Vec<u8> = remark.encode().into();
+	let bounded_vec = BoundedVec::try_from(encoded_call).unwrap();
+
+	let transfer_amount = 50_000u128;
+	let transact_fee_amount = 10_000u128;
+	let transfer_dest_weight = 4_000;
+	let transact_dest_weight = 4_000;
+
+	ParaA::execute_with(|| {
+		assert_ok!(ParaXTokens::transfer_with_transact(
+			Some(ALICE).into(),
+			CurrencyId::A,
+			transfer_amount,
+			2, // PARA_B_ID,
+			transfer_dest_weight,
+			bounded_vec,
+			transact_fee_amount,
+			transact_dest_weight,
+		));
+
+		assert_eq!(ParaTokens::free_balance(CurrencyId::A, &ALICE), transfer_amount);
+	});
+
+	ParaB::execute_with(|| {
+		assert!(para::System::events()
+			.iter()
+			.any(|r| matches!(r.event, para::Event::System(frame_system::Event::Remarked { .. }))));
+		let user_multilocaiton = (
+			Parent,
+			Parachain(1),
+			Junction::AccountId32 {
+				network: NetworkId::Any,
+				id: ALICE.into(),
+			},
+		)
+			.into();
+
+		let mut token_transfer_msg = Xcm(vec![ClearOrigin, ClearOrigin, ClearOrigin, ClearOrigin]);
+		let token_transfer_weight = ParaWeigher::weight(&mut token_transfer_msg).unwrap() as u128;
+
+		let mut transact_msg = Xcm(vec![
+			ClearOrigin,
+			ClearOrigin,
+			ClearOrigin,
+			ClearOrigin,
+			ClearOrigin,
+			Transact {
+				origin_type: SovereignAccount,
+				require_weight_at_most: transact_dest_weight,
+				call: vec![].into(),
+			},
+		]);
+		let transact_msg_weight = ParaWeigher::weight(&mut transact_msg).unwrap() as u128;
+
+		let user_sovereign_account = ParaAccount32Hash::convert_ref(&user_multilocaiton).unwrap();
+
+		assert_eq!(
+			ParaTokens::free_balance(CurrencyId::A, &user_sovereign_account),
+			// AllTokensAreCreatedEqualToWeight means 1 to 1 mapping of the weight to fee
+			transfer_amount - token_transfer_weight - transact_msg_weight
+		);
+	});
+}
+
+#[test]
+fn transfer_with_transact_to_reserve_sibling() {
+	TestNet::reset();
+
+	ParaA::execute_with(|| {
+		assert_ok!(ParaTokens::deposit(CurrencyId::B, &ALICE, 100_000));
+		assert_ok!(ParaTokens::deposit(CurrencyId::A, &sibling_b_account(), 100_000));
+	});
+
+	ParaB::execute_with(|| {
+		assert_ok!(ParaTokens::deposit(CurrencyId::B, &sibling_a_account(), 100_000));
+		assert_ok!(ParaTokens::deposit(CurrencyId::A, &BOB, 100_000));
+	});
+
+	let remark = para::Call::System(frame_system::Call::<para::Runtime>::remark_with_event { remark: vec![1, 2, 3] });
+	let encoded_call: Vec<u8> = remark.encode().into();
+	let bounded_vec = BoundedVec::try_from(encoded_call).unwrap();
+
+	let transfer_amount = 50_000u128;
+	let transact_fee_amount = 10_000u128;
+	let transfer_dest_weight = 4_000;
+	let transact_dest_weight = 4_000;
+
+	ParaA::execute_with(|| {
+		assert_ok!(ParaXTokens::transfer_with_transact(
+			Some(ALICE).into(),
+			CurrencyId::B,
+			transfer_amount,
+			2, // PARA_B_ID,
+			transfer_dest_weight,
+			bounded_vec.clone(),
+			transact_fee_amount,
+			transact_dest_weight,
+		));
+
+		assert_eq!(ParaTokens::free_balance(CurrencyId::B, &ALICE), transfer_amount);
+	});
+
+	ParaB::execute_with(|| {
+		assert!(para::System::events()
+			.iter()
+			.any(|r| matches!(r.event, para::Event::System(frame_system::Event::Remarked { .. }))));
+
+		assert_eq!(
+			ParaTokens::free_balance(CurrencyId::B, &sibling_a_account()),
+			transfer_amount
+		);
+
+		let user_multilocaiton = (
+			Parent,
+			Parachain(1),
+			Junction::AccountId32 {
+				network: NetworkId::Any,
+				id: ALICE.into(),
+			},
+		)
+			.into();
+
+		let mut token_transfer_msg = Xcm(vec![ClearOrigin, ClearOrigin, ClearOrigin, ClearOrigin]);
+		let token_transfer_weight = ParaWeigher::weight(&mut token_transfer_msg).unwrap() as u128;
+
+		let mut transact_msg = Xcm(vec![
+			ClearOrigin,
+			ClearOrigin,
+			ClearOrigin,
+			ClearOrigin,
+			ClearOrigin,
+			Transact {
+				origin_type: SovereignAccount,
+				require_weight_at_most: transact_dest_weight,
+				call: vec![].into(),
+			},
+		]);
+		let transact_msg_weight = ParaWeigher::weight(&mut transact_msg).unwrap() as u128;
+
+		let user_sovereign_account = ParaAccount32Hash::convert_ref(&user_multilocaiton).unwrap();
+		assert_eq!(
+			ParaTokens::free_balance(CurrencyId::B, &user_sovereign_account),
+			// AllTokensAreCreatedEqualToWeight means 1 to 1 mapping of the weight to fee
+			transfer_amount - token_transfer_weight - transact_msg_weight
+		);
+	});
+}
+
+#[test]
+fn transfer_with_transact_to_non_reserve_sibling() {
+	TestNet::reset();
+
+	ParaA::execute_with(|| {
+		assert_eq!(ParaTokens::free_balance(CurrencyId::R, &ALICE), 1_000);
+		assert_ok!(ParaTokens::deposit(CurrencyId::R, &ALICE, 100_000));
+	});
+
+	Relay::execute_with(|| {
+		let _ = RelayBalances::deposit_creating(&para_a_account(), 100_000);
+	});
+
+	let remark = para::Call::System(frame_system::Call::<para::Runtime>::remark_with_event { remark: vec![1, 2, 3] });
+	let encoded_call: Vec<u8> = remark.encode().into();
+	let bounded_vec = BoundedVec::try_from(encoded_call).unwrap();
+
+	let transfer_amount = 50_000u128;
+	let transact_fee_amount = 10_000u128;
+	let transfer_dest_weight = 4_000;
+	let transact_dest_weight = 4_000;
+
+	ParaA::execute_with(|| {
+		assert_ok!(ParaXTokens::transfer_with_transact(
+			Some(ALICE).into(),
+			CurrencyId::R,
+			transfer_amount,
+			2, // PARA_B_ID,
+			transfer_dest_weight,
+			bounded_vec,
+			transact_fee_amount,
+			transact_dest_weight,
+		));
+
+		assert_eq!(ParaTokens::free_balance(CurrencyId::R, &ALICE), transfer_amount + 1_000);
+	});
+
+	ParaB::execute_with(|| {
+		assert!(para::System::events()
+			.iter()
+			.any(|r| matches!(r.event, para::Event::System(frame_system::Event::Remarked { .. }))));
+
+		let user_multilocaiton = (
+			Parent,
+			Parachain(1),
+			Junction::AccountId32 {
+				network: NetworkId::Any,
+				id: ALICE.into(),
+			},
+		)
+			.into();
+
+		let mut token_transfer_msg = Xcm(vec![ClearOrigin, ClearOrigin, ClearOrigin, ClearOrigin]);
+		let token_transfer_weight = ParaWeigher::weight(&mut token_transfer_msg).unwrap() as u128;
+		let mut token_transfer_msg_on_relay = Xcm(vec![ClearOrigin, ClearOrigin, ClearOrigin, ClearOrigin]);
+		let token_transfer_weight_on_relay = RelayWeigher::weight(&mut token_transfer_msg_on_relay).unwrap() as u128;
+
+		let mut transact_msg = Xcm(vec![
+			ClearOrigin,
+			ClearOrigin,
+			ClearOrigin,
+			ClearOrigin,
+			ClearOrigin,
+			Transact {
+				origin_type: SovereignAccount,
+				require_weight_at_most: transact_dest_weight,
+				call: vec![].into(),
+			},
+		]);
+		let transact_msg_weight = ParaWeigher::weight(&mut transact_msg).unwrap() as u128;
+
+		let user_sovereign_account = ParaAccount32Hash::convert_ref(&user_multilocaiton).unwrap();
+
+		assert_eq!(
+			ParaTokens::free_balance(CurrencyId::R, &user_sovereign_account),
+			// AllTokensAreCreatedEqualToWeight means 1 to 1 mapping of the weight to fee
+			transfer_amount - token_transfer_weight_on_relay - token_transfer_weight - transact_msg_weight
+		);
 	});
 }
 
@@ -1021,8 +1265,6 @@ fn send_as_sovereign() {
 	});
 
 	ParaA::execute_with(|| {
-		use xcm::latest::OriginKind::SovereignAccount;
-
 		let call =
 			relay::Call::System(frame_system::Call::<relay::Runtime>::remark_with_event { remark: vec![1, 1, 1] });
 		let assets: MultiAsset = (Here, 1_000_000_000_000).into();
