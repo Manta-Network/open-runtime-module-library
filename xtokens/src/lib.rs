@@ -99,6 +99,8 @@ pub mod module {
 		/// MultiLocation filter
 		type MultiLocationsFilter: Contains<MultiLocation>;
 
+		type OutgoingAssetsFilter: Contains<Self::CurrencyId>;
+
 		/// Means of measuring the weight consumed by an XCM message locally.
 		type Weigher: WeightBounds<Self::RuntimeCall>;
 
@@ -177,6 +179,8 @@ pub mod module {
 		NotSupportedMultiLocation,
 		/// MinXcmFee not registered for certain reserve location
 		MinXcmFeeNotDefined,
+		/// The asset is (temporarily) disabled for outgoing transfers
+		AssetDisabledForOutgoingTransfers
 	}
 
 	#[pallet::hooks]
@@ -387,6 +391,11 @@ pub mod module {
 			dest: MultiLocation,
 			dest_weight_limit: WeightLimit,
 		) -> DispatchResult {
+			ensure!(
+				T::OutgoingAssetsFilter::contains(&currency_id),
+				Error::<T>::AssetDisabledForOutgoingTransfers
+			);
+
 			let location: MultiLocation =
 				T::CurrencyIdConvert::convert(currency_id).ok_or(Error::<T>::NotCrossChainTransferableCurrency)?;
 
@@ -395,7 +404,7 @@ pub mod module {
 				T::MultiLocationsFilter::contains(&dest),
 				Error::<T>::NotSupportedMultiLocation
 			);
-
+			
 			let asset: MultiAsset = (location, amount.into()).into();
 			Self::do_transfer_multiassets(who, vec![asset.clone()].into(), asset, dest, dest_weight_limit)
 		}
