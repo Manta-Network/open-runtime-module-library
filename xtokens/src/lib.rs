@@ -480,6 +480,12 @@ pub mod module {
 				currencies.len() <= T::MaxAssetsForTransfer::get(),
 				Error::<T>::TooManyAssetsBeingSent
 			);
+			for (currency_id, _) in currencies.iter() {
+				ensure!(
+					!T::OutgoingAssetsFilter::contains(currency_id),
+					Error::<T>::AssetDisabledForOutgoingTransfers
+				);
+			}
 			ensure!(
 				T::MultiLocationsFilter::contains(&dest),
 				Error::<T>::NotSupportedMultiLocation
@@ -491,8 +497,17 @@ pub mod module {
 			let (fee_currency_id, fee_amount) = currencies
 				.get(fee_item as usize)
 				.ok_or(Error::<T>::AssetIndexNonExistent)?;
+			ensure!(
+				!T::OutgoingAssetsFilter::contains(fee_currency_id),
+				Error::<T>::AssetDisabledForOutgoingTransfers
+			);
 
 			for (currency_id, amount) in &currencies {
+				ensure!(
+					!T::OutgoingAssetsFilter::contains(currency_id),
+					Error::<T>::AssetDisabledForOutgoingTransfers
+				);
+
 				let location: MultiLocation = T::CurrencyIdConvert::convert(currency_id.clone())
 					.ok_or(Error::<T>::NotCrossChainTransferableCurrency)?;
 				ensure!(!amount.is_zero(), Error::<T>::ZeroAmount);
