@@ -180,7 +180,7 @@ pub mod module {
 		/// MinXcmFee not registered for certain reserve location
 		MinXcmFeeNotDefined,
 		/// The asset is (temporarily) disabled for outgoing transfers
-		AssetDisabledForOutgoingTransfers
+		AssetDisabledForOutgoingTransfers,
 	}
 
 	#[pallet::hooks]
@@ -392,7 +392,7 @@ pub mod module {
 			dest_weight_limit: WeightLimit,
 		) -> DispatchResult {
 			ensure!(
-				T::OutgoingAssetsFilter::contains(&currency_id),
+				!T::OutgoingAssetsFilter::contains(&currency_id),
 				Error::<T>::AssetDisabledForOutgoingTransfers
 			);
 
@@ -404,7 +404,7 @@ pub mod module {
 				T::MultiLocationsFilter::contains(&dest),
 				Error::<T>::NotSupportedMultiLocation
 			);
-			
+
 			let asset: MultiAsset = (location, amount.into()).into();
 			Self::do_transfer_multiassets(who, vec![asset.clone()].into(), asset, dest, dest_weight_limit)
 		}
@@ -417,6 +417,11 @@ pub mod module {
 			dest: MultiLocation,
 			dest_weight_limit: WeightLimit,
 		) -> DispatchResult {
+			ensure!(
+				!T::OutgoingAssetsFilter::contains(&currency_id),
+				Error::<T>::AssetDisabledForOutgoingTransfers
+			);
+
 			let location: MultiLocation =
 				T::CurrencyIdConvert::convert(currency_id).ok_or(Error::<T>::NotCrossChainTransferableCurrency)?;
 
