@@ -99,6 +99,7 @@ pub mod module {
 		/// MultiLocation filter
 		type MultiLocationsFilter: Contains<MultiLocation>;
 
+		/// Asset locations filter for outgoing transfers
 		type OutgoingAssetsFilter: Contains<Self::CurrencyId>;
 
 		/// Means of measuring the weight consumed by an XCM message locally.
@@ -480,12 +481,6 @@ pub mod module {
 				currencies.len() <= T::MaxAssetsForTransfer::get(),
 				Error::<T>::TooManyAssetsBeingSent
 			);
-			for (currency_id, _) in currencies.iter() {
-				ensure!(
-					!T::OutgoingAssetsFilter::contains(currency_id),
-					Error::<T>::AssetDisabledForOutgoingTransfers
-				);
-			}
 			ensure!(
 				T::MultiLocationsFilter::contains(&dest),
 				Error::<T>::NotSupportedMultiLocation
