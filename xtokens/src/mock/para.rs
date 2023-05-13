@@ -227,6 +227,10 @@ match_types! {
 		MultiLocation { parents: 1, interior: X2(Parachain(4), Junction::AccountId32 { .. }) } |
 		MultiLocation { parents: 1, interior: X2(Parachain(100), Junction::AccountId32 { .. }) }
 	};
+
+	pub type DisabledForOutgoingTransfers: impl Contains<CurrencyId> = {
+		CurrencyId::P
+	};
 }
 
 parameter_type_with_key! {
@@ -247,6 +251,7 @@ impl orml_xtokens::Config for Runtime {
 	type AccountIdToMultiLocation = AccountIdToMultiLocation;
 	type SelfLocation = SelfLocation;
 	type MultiLocationsFilter = ParentOrParachains;
+	type OutgoingAssetsFilter = DisabledForOutgoingTransfers;
 	type MinXcmFee = ParachainMinFee;
 	type XcmExecutor = XcmExecutor<XcmConfig>;
 	type Weigher = FixedWeightBounds<ConstU64<10>, RuntimeCall, ConstU32<100>>;

@@ -227,6 +227,7 @@ impl Convert<CurrencyId, Option<MultiLocation>> for RelativeCurrencyIdConvert {
 			CurrencyId::B2 => Some((Parent, Parachain(2), GeneralKey(b"B2".to_vec().try_into().unwrap())).into()),
 			CurrencyId::C => Some((Parent, Parachain(3), GeneralKey(b"C".to_vec().try_into().unwrap())).into()),
 			CurrencyId::D => Some(GeneralKey(b"D".to_vec().try_into().unwrap()).into()),
+			CurrencyId::P => Some(GeneralKey(b"P".to_vec().try_into().unwrap()).into()),
 		}
 	}
 }
@@ -318,6 +319,7 @@ impl orml_xtokens::Config for Runtime {
 	type CurrencyIdConvert = RelativeCurrencyIdConvert;
 	type AccountIdToMultiLocation = AccountIdToMultiLocation;
 	type SelfLocation = SelfLocation;
+	type OutgoingAssetsFilter = ();
 	type MultiLocationsFilter = ParentOrParachains;
 	type MinXcmFee = ParachainMinFee;
 	type XcmExecutor = XcmExecutor<XcmConfig>;
