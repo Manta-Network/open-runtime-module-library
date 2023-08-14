@@ -44,6 +44,7 @@ use xcm_executor::traits::{InvertLocation, WeightBounds};
 pub use module::*;
 use orml_traits::{
 	location::{Parse, Reserve},
+	xcm_transfer::NativeBarrier,
 	GetByKey, XcmTransfer,
 };
 
@@ -101,6 +102,9 @@ pub mod module {
 
 		/// Asset locations filter for outgoing transfers
 		type OutgoingAssetsFilter: Contains<Self::CurrencyId>;
+
+		///
+		type NativeBarrierType: NativeBarrier<Self::AccountId, Self::Balance>;
 
 		/// Means of measuring the weight consumed by an XCM message locally.
 		type Weigher: WeightBounds<Self::RuntimeCall>;
@@ -397,6 +401,10 @@ pub mod module {
 				Error::<T>::AssetDisabledForOutgoingTransfers
 			);
 
+			//if asset_id == <T::AssetConfig as AssetConfig<T>>::NativeAssetId::get() {
+			<T::NativeBarrierType>::ensure_xcm_transfer_limit_not_exceeded(&who, amount)?;
+			//}
+
 			let location: MultiLocation =
 				T::CurrencyIdConvert::convert(currency_id).ok_or(Error::<T>::NotCrossChainTransferableCurrency)?;
 
@@ -422,6 +430,10 @@ pub mod module {
 				!T::OutgoingAssetsFilter::contains(&currency_id),
 				Error::<T>::AssetDisabledForOutgoingTransfers
 			);
+
+			//if asset_id == <T::AssetConfig as AssetConfig<T>>::NativeAssetId::get() {
+			<T::NativeBarrierType>::ensure_xcm_transfer_limit_not_exceeded(&who, amount)?;
+			//}
 
 			let location: MultiLocation =
 				T::CurrencyIdConvert::convert(currency_id).ok_or(Error::<T>::NotCrossChainTransferableCurrency)?;
@@ -502,6 +514,10 @@ pub mod module {
 					!T::OutgoingAssetsFilter::contains(currency_id),
 					Error::<T>::AssetDisabledForOutgoingTransfers
 				);
+
+				//if asset_id == <T::AssetConfig as AssetConfig<T>>::NativeAssetId::get() {
+				<T::NativeBarrierType>::ensure_xcm_transfer_limit_not_exceeded(&who, *amount)?;
+				//}
 
 				let location: MultiLocation = T::CurrencyIdConvert::convert(currency_id.clone())
 					.ok_or(Error::<T>::NotCrossChainTransferableCurrency)?;
