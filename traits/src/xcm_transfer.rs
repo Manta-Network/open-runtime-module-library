@@ -29,3 +29,11 @@ pub trait XcmTransfer<AccountId, Balance, CurrencyId> {
 		dest_weight_limit: WeightLimit,
 	) -> DispatchResult;
 }
+
+pub trait NativeBarrier<AccountId, Balance> {
+    fn update_xcm_native_transfers(account_id: &AccountId, amount: Balance);
+    fn ensure_xcm_transfer_limit_not_exceeded(
+        account_id: &AccountId,
+        amount: Balance,
+    ) -> DispatchResult;
+}
