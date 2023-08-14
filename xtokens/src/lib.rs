@@ -44,7 +44,7 @@ use xcm_executor::traits::{InvertLocation, WeightBounds};
 pub use module::*;
 use orml_traits::{
 	location::{Parse, Reserve},
-	xcm_transfer::NativeBarrier,
+	xcm_transfer::{NativeBarrier, NativeChecker},
 	GetByKey, XcmTransfer,
 };
 
@@ -104,7 +104,7 @@ pub mod module {
 		type OutgoingAssetsFilter: Contains<Self::CurrencyId>;
 
 		///
-		type NativeBarrierType: NativeBarrier<Self::AccountId, Self::Balance>;
+		type NativeBarrierType: NativeBarrier<Self::AccountId, Self::Balance> + NativeChecker<Self::CurrencyId>;
 
 		/// Means of measuring the weight consumed by an XCM message locally.
 		type Weigher: WeightBounds<Self::RuntimeCall>;
@@ -401,9 +401,9 @@ pub mod module {
 				Error::<T>::AssetDisabledForOutgoingTransfers
 			);
 
-			//if asset_id == <T::AssetConfig as AssetConfig<T>>::NativeAssetId::get() {
-			<T::NativeBarrierType>::ensure_xcm_transfer_limit_not_exceeded(&who, amount)?;
-			//}
+			if <T::NativeBarrierType>::is_native(&currency_id) {
+				<T::NativeBarrierType>::ensure_xcm_transfer_limit_not_exceeded(&who, amount)?;
+			}
 
 			let location: MultiLocation =
 				T::CurrencyIdConvert::convert(currency_id).ok_or(Error::<T>::NotCrossChainTransferableCurrency)?;
@@ -431,9 +431,9 @@ pub mod module {
 				Error::<T>::AssetDisabledForOutgoingTransfers
 			);
 
-			//if asset_id == <T::AssetConfig as AssetConfig<T>>::NativeAssetId::get() {
-			<T::NativeBarrierType>::ensure_xcm_transfer_limit_not_exceeded(&who, amount)?;
-			//}
+			if <T::NativeBarrierType>::is_native(&currency_id) {
+				<T::NativeBarrierType>::ensure_xcm_transfer_limit_not_exceeded(&who, amount)?;
+			}
 
 			let location: MultiLocation =
 				T::CurrencyIdConvert::convert(currency_id).ok_or(Error::<T>::NotCrossChainTransferableCurrency)?;
@@ -515,9 +515,9 @@ pub mod module {
 					Error::<T>::AssetDisabledForOutgoingTransfers
 				);
 
-				//if asset_id == <T::AssetConfig as AssetConfig<T>>::NativeAssetId::get() {
-				<T::NativeBarrierType>::ensure_xcm_transfer_limit_not_exceeded(&who, *amount)?;
-				//}
+				if <T::NativeBarrierType>::is_native(&currency_id) {
+					<T::NativeBarrierType>::ensure_xcm_transfer_limit_not_exceeded(&who, *amount)?;
+				}
 
 				let location: MultiLocation = T::CurrencyIdConvert::convert(currency_id.clone())
 					.ok_or(Error::<T>::NotCrossChainTransferableCurrency)?;

@@ -36,5 +36,5 @@ pub trait NativeBarrier<AccountId, Balance> {
 }
 
 pub trait NativeChecker<CurrencyId> {
-	fn is_native(currency_id: CurrencyId) -> bool;
+	fn is_native(currency_id: &CurrencyId) -> bool;
 }
