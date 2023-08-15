@@ -38,17 +38,3 @@ pub trait NativeBarrier<AccountId, Balance> {
 pub trait NativeChecker<CurrencyId> {
 	fn is_native(currency_id: &CurrencyId) -> bool;
 }
-
-impl NativeBarrier<(), ()> for () {
-	fn update_xcm_native_transfers(_account_id: &(), _amount: ()) {}
-	fn ensure_xcm_transfer_limit_not_exceeded(_account_id: &(), _amount: ()) -> DispatchResult {
-		Ok(())
-	}
-}
-
-impl NativeChecker<()> for () {
-	fn is_native(_currency_id: &()) -> bool {
-		// Specific implementation for the unit type ()
-		true
-	}
-}
