@@ -44,7 +44,7 @@ use xcm_executor::traits::{InvertLocation, WeightBounds};
 pub use module::*;
 use orml_traits::{
 	location::{Parse, Reserve},
-	xcm_transfer::{NativeBarrier, NativeChecker},
+	native_barrier::{NativeBarrier, NativeChecker},
 	GetByKey, XcmTransfer,
 };
 
@@ -402,7 +402,7 @@ pub mod module {
 			);
 
 			if <T::NativeBarrierType>::is_native(&currency_id) {
-				<T::NativeBarrierType>::ensure_xcm_transfer_limit_not_exceeded(&who, amount)?;
+				<T::NativeBarrierType>::ensure_limit_not_exceeded(&who, amount)?;
 			}
 
 			let location: MultiLocation =
@@ -432,7 +432,7 @@ pub mod module {
 			);
 
 			if <T::NativeBarrierType>::is_native(&currency_id) {
-				<T::NativeBarrierType>::ensure_xcm_transfer_limit_not_exceeded(&who, amount)?;
+				<T::NativeBarrierType>::ensure_limit_not_exceeded(&who, amount)?;
 			}
 
 			let location: MultiLocation =
@@ -516,7 +516,7 @@ pub mod module {
 				);
 
 				if <T::NativeBarrierType>::is_native(&currency_id) {
-					<T::NativeBarrierType>::ensure_xcm_transfer_limit_not_exceeded(&who, *amount)?;
+					<T::NativeBarrierType>::ensure_limit_not_exceeded(&who, *amount)?;
 				}
 
 				let location: MultiLocation = T::CurrencyIdConvert::convert(currency_id.clone())
