@@ -38,7 +38,6 @@ pub mod nft;
 pub mod price;
 pub mod rewards;
 pub mod xcm_transfer;
-pub mod native_barrier;
 
 /// New data handler
 #[impl_trait_for_tuples::impl_for_tuples(30)]
