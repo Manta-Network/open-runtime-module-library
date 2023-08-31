@@ -103,9 +103,6 @@ pub mod module {
 		/// Asset locations filter for outgoing transfers
 		type OutgoingAssetsFilter: Contains<Self::CurrencyId>;
 
-		///
-		type NativeBarrierType: NativeBarrier<Self::AccountId, Self::Balance> + NativeChecker<Self::CurrencyId>;
-
 		/// Means of measuring the weight consumed by an XCM message locally.
 		type Weigher: WeightBounds<Self::RuntimeCall>;
 
@@ -404,7 +401,7 @@ pub mod module {
 			if <T::NativeBarrierType>::is_native(&currency_id) {
 				<T::NativeBarrierType>::ensure_limit_not_exceeded(&who, amount)?;
 			}
-
+      
 			let location: MultiLocation =
 				T::CurrencyIdConvert::convert(currency_id).ok_or(Error::<T>::NotCrossChainTransferableCurrency)?;
 
