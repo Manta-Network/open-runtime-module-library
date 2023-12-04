@@ -283,6 +283,7 @@ impl orml_xtokens::Config for Runtime {
 	type UniversalLocation = UniversalLocation;
 	type MaxAssetsForTransfer = MaxAssetsForTransfer;
 	type ReserveProvider = AbsoluteReserveProvider;
+	type OutgoingAssetsFilter = ();
 }
 
 impl orml_xcm::Config for Runtime {
