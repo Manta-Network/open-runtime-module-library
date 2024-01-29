@@ -130,6 +130,9 @@ pub mod module {
 		/// The way to retreave the reserve of a MultiAsset. This can be
 		/// configured to accept absolute or relative paths for self tokens
 		type ReserveProvider: Reserve;
+
+		/// Asset locations filter for outgoing transfers
+		type OutgoingAssetsFilter: Contains<Self::CurrencyId>;
 	}
 
 	#[pallet::event]
@@ -187,6 +190,8 @@ pub mod module {
 		NotSupportedMultiLocation,
 		/// MinXcmFee not registered for certain reserve location
 		MinXcmFeeNotDefined,
+		/// The asset is (temporarily) disabled for outgoing transfers
+		AssetDisabledForOutgoingTransfers,
 	}
 
 	#[pallet::hooks]
@@ -397,6 +402,11 @@ pub mod module {
 			dest: MultiLocation,
 			dest_weight_limit: WeightLimit,
 		) -> Result<Transferred<T::AccountId>, DispatchError> {
+			ensure!(
+				!T::OutgoingAssetsFilter::contains(&currency_id),
+				Error::<T>::AssetDisabledForOutgoingTransfers
+			);
+
 			let location: MultiLocation =
 				T::CurrencyIdConvert::convert(currency_id).ok_or(Error::<T>::NotCrossChainTransferableCurrency)?;
 
@@ -418,6 +428,11 @@ pub mod module {
 			dest: MultiLocation,
 			dest_weight_limit: WeightLimit,
 		) -> Result<Transferred<T::AccountId>, DispatchError> {
+			ensure!(
+				!T::OutgoingAssetsFilter::contains(&currency_id),
+				Error::<T>::AssetDisabledForOutgoingTransfers
+			);
+
 			let location: MultiLocation =
 				T::CurrencyIdConvert::convert(currency_id).ok_or(Error::<T>::NotCrossChainTransferableCurrency)?;
 
@@ -485,8 +500,17 @@ pub mod module {
 			let (fee_currency_id, fee_amount) = currencies
 				.get(fee_item as usize)
 				.ok_or(Error::<T>::AssetIndexNonExistent)?;
+			ensure!(
+				!T::OutgoingAssetsFilter::contains(fee_currency_id),
+				Error::<T>::AssetDisabledForOutgoingTransfers
+			);
 
 			for (currency_id, amount) in &currencies {
+				ensure!(
+					!T::OutgoingAssetsFilter::contains(currency_id),
+					Error::<T>::AssetDisabledForOutgoingTransfers
+				);
+
 				let location: MultiLocation = T::CurrencyIdConvert::convert(currency_id.clone())
 					.ok_or(Error::<T>::NotCrossChainTransferableCurrency)?;
 				ensure!(!amount.is_zero(), Error::<T>::ZeroAmount);

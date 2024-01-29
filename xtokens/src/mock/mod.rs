@@ -53,6 +53,8 @@ pub enum CurrencyId {
 	C,
 	/// Parachain D token
 	D,
+	/// Disabled outgoing token
+	P,
 }
 
 pub struct CurrencyIdConvert;
@@ -113,6 +115,14 @@ impl Convert<CurrencyId, Option<MultiLocation>> for CurrencyIdConvert {
 					Parent,
 					Parachain(4),
 					Junction::from(BoundedVec::try_from(b"D".to_vec()).unwrap()),
+				)
+					.into(),
+			),
+			CurrencyId::P => Some(
+				(
+					Parent,
+					Parachain(4),
+					Junction::from(BoundedVec::try_from(b"C".to_vec()).unwrap()),
 				)
 					.into(),
 			),

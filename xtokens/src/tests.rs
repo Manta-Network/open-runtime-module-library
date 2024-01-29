@@ -1818,3 +1818,49 @@ fn nfts_cannot_be_fee_assets() {
 		);
 	});
 }
+
+fn send_disabled_asset_should_fail() {
+	TestNet::reset();
+
+	ParaA::execute_with(|| {
+		assert_err!(
+			ParaXTokens::transfer(
+				Some(ALICE).into(),
+				CurrencyId::P,
+				500,
+				Box::new(
+					MultiLocation::new(
+						1,
+						X1(Junction::AccountId32 {
+							network: None,
+							id: BOB.into(),
+						})
+					)
+					.into()
+				),
+				WeightLimit::Unlimited
+			),
+			Error::<para::Runtime>::AssetDisabledForOutgoingTransfers
+		);
+		assert_err!(
+			ParaXTokens::transfer_multicurrencies(
+				Some(ALICE).into(),
+				vec![(CurrencyId::P, 50), (CurrencyId::A, 450)],
+				0,
+				Box::new(
+					(
+						Parent,
+						Parachain(2),
+						Junction::AccountId32 {
+							network: None,
+							id: BOB.into(),
+						},
+					)
+						.into()
+				),
+				WeightLimit::Unlimited
+			),
+			Error::<para::Runtime>::AssetDisabledForOutgoingTransfers
+		);
+	});
+}

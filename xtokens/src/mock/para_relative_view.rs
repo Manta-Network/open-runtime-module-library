@@ -242,6 +242,7 @@ impl Convert<CurrencyId, Option<MultiLocation>> for RelativeCurrencyIdConvert {
 					.into(),
 			),
 			CurrencyId::D => Some(Junction::from(BoundedVec::try_from(b"D".to_vec()).unwrap()).into()),
+			CurrencyId::P => Some(Junction::from(BoundedVec::try_from(b"P".to_vec()).unwrap()).into()),
 		}
 	}
 }
@@ -350,6 +351,7 @@ impl orml_xtokens::Config for Runtime {
 	type UniversalLocation = UniversalLocation;
 	type MaxAssetsForTransfer = MaxAssetsForTransfer;
 	type ReserveProvider = RelativeReserveProvider;
+	type OutgoingAssetsFilter = ();
 }
 
 impl orml_xcm::Config for Runtime {
